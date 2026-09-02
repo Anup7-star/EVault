@@ -1,0 +1,40 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-main: #141312;
+}
+
+body {
+  background-color: var(--bg-main);
+  color: #f5f2eb;
+  min-height: 100vh;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(20, 19, 18, 0.6);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(163, 158, 147, 0.25);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(217, 119, 6, 0.5);
+}
+
+/* Interactive element accessibility & focus states */
+a, button, input, textarea, select {
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px #141312, 0 0 0 4px #d97706;
+}
