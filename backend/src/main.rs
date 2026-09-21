@@ -85,10 +85,27 @@ async fn main() -> anyhow::Result<()> {
         .route("/health", get(health))
         .merge(evault_backend::api::auth::router(pool.clone(), session_secret.clone()))
         .merge(evault_backend::api::vaults::router(pool.clone(), shared_contract_client, session_secret))
-        .layer(tower_http::trace::TraceLayer::new_for_http())
+        .layer(
+            tower_http::trace::TraceLayer::new_for_http().make_span_with(
+                |request: &axum::http::Request<axum::body::Body>| {
+                    let request_id = request
+                        .headers()
+                        .get("x-request-id")
+                        .and_then(|value| value.to_str().ok())
+                        .unwrap_or("unknown");
+                    tracing::info_span!(
+                        "request",
+                        method = %request.method(),
+                        uri = %request.uri(),
+                        request_id = %request_id,
+                    )
+                },
+            ),
+        )
         .layer(tower_http::request_id::SetRequestIdLayer::x_request_id(
             tower_http::request_id::MakeRequestUuid,
         ))
+        // TODO: Restrict CORS origin to frontend URL in production
         .layer(tower_http::cors::CorsLayer::permissive());
 
     // 9. Start server

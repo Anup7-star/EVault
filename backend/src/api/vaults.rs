@@ -147,20 +147,24 @@ pub struct GrantPermissionRequest {
     pub expires_at: DateTime<Utc>,
 }
 
-// ── Helper: resolve request-id from extensions ───────────────────────────────
-
-fn request_id_from_state() -> Uuid {
-    Uuid::new_v4() // per-call UUID; real request-id propagation via tower middleware
+// ── Helper: extract request-id from headers ──────────────────────────────────
+fn extract_request_id(headers: &axum::http::HeaderMap) -> Uuid {
+    headers
+        .get("x-request-id")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| Uuid::parse_str(s).ok())
+        .unwrap_or_else(Uuid::new_v4)
 }
 
 // ── POST /vaults ─────────────────────────────────────────────────────────────
 
 pub async fn create_vault(
     State(state): State<Arc<VaultState>>,
+    headers: axum::http::HeaderMap,
     wallet: AuthenticatedWallet,
     Json(body): Json<CreateVaultRequest>,
 ) -> Result<(StatusCode, Json<VaultResponse>), VaultError> {
-    let request_id = request_id_from_state();
+    let request_id = extract_request_id(&headers);
     let owner_wallet = wallet.0.clone();
 
     // Orphan-resource risk: if this endpoint is called but the on-chain vault doesn't
@@ -333,10 +337,11 @@ pub async fn get_vault(
 
 pub async fn get_vault_secret(
     State(state): State<Arc<VaultState>>,
+    headers: axum::http::HeaderMap,
     wallet: AuthenticatedWallet,
     Path(vault_id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, VaultError> {
-    let request_id = request_id_from_state();
+    let request_id = extract_request_id(&headers);
     let caller = wallet.0.clone();
 
     // Step 1 & 2: Look up vault, 404 if missing
@@ -490,11 +495,12 @@ pub async fn list_permissions(
 
 pub async fn grant_permission(
     State(state): State<Arc<VaultState>>,
+    headers: axum::http::HeaderMap,
     wallet: AuthenticatedWallet,
     Path(vault_id): Path<Uuid>,
     Json(body): Json<GrantPermissionRequest>,
 ) -> Result<StatusCode, VaultError> {
-    let request_id = request_id_from_state();
+    let request_id = extract_request_id(&headers);
     let caller = wallet.0.clone();
 
     // Verify owner
@@ -558,10 +564,11 @@ pub async fn grant_permission(
 
 pub async fn revoke_permission(
     State(state): State<Arc<VaultState>>,
+    headers: axum::http::HeaderMap,
     wallet: AuthenticatedWallet,
     Path((vault_id, grantee_wallet)): Path<(Uuid, String)>,
 ) -> Result<StatusCode, VaultError> {
-    let request_id = request_id_from_state();
+    let request_id = extract_request_id(&headers);
     let caller = wallet.0.clone();
 
     // Verify owner
