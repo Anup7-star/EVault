@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: evault-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: evault
+      POSTGRES_PASSWORD: evault
+      POSTGRES_DB: evault
+    ports:
+      - "5432:5432"
+    volumes:
+      - evault-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U evault -d evault"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  evault-pgdata:
+    name: evault-pgdata
