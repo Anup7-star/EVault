@@ -23,35 +23,13 @@ async fn deploy_and_get_client() -> (ContractClient, Address, Arc<SignerMiddlewa
         );
     }
 
-    // Deploy contract using hardhat script
-    // Note: This runs from the EVault root if we run tests from backend (we will adjust cwd)
-    #[cfg(windows)]
-    let npx_cmd = "npx.cmd";
-    #[cfg(not(windows))]
-    let npx_cmd = "npx";
-
-    let deploy_status = Command::new(npx_cmd)
-        .arg("hardhat")
-        .arg("run")
-        .arg("scripts/deploy.js")
-        .arg("--network")
-        .arg("localhost")
-        .current_dir("..")
-        .status()
-        .expect("Failed to execute npx hardhat run scripts/deploy.js. Is npx in PATH?");
-
-    if !deploy_status.success() {
-        panic!("Failed to deploy VaultAccessRegistry contract to local hardhat node");
-    }
-
-    // Read the deployed address from lib/contract.json
-    let contract_json_str = std::fs::read_to_string("../lib/contract.json")
-        .expect("Failed to read ../lib/contract.json");
+    let contract_json_str = std::fs::read_to_string("abi/VaultAccessRegistry.json")
+        .expect("Failed to read abi/VaultAccessRegistry.json");
     let contract_json: serde_json::Value = serde_json::from_str(&contract_json_str).unwrap();
-    let contract_address_str = contract_json["address"].as_str().unwrap();
-    
-    let client = ContractClient::new(HARDHAT_RPC_URL, contract_address_str)
-        .expect("Failed to create ContractClient");
+    let abi_value = contract_json["abi"].clone();
+    let abi: ethers::abi::Abi = serde_json::from_value(abi_value).unwrap();
+    let bytecode_str = contract_json["bytecode"].as_str().unwrap();
+    let bytecode = ethers::core::types::Bytes::from(hex::decode(&bytecode_str[2..]).unwrap());
 
     // Setup signer for hardhat account 0
     let private_key = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
@@ -61,7 +39,20 @@ async fn deploy_and_get_client() -> (ContractClient, Address, Arc<SignerMiddlewa
     let wallet = wallet.with_chain_id(chain_id);
     let signer = Arc::new(SignerMiddleware::new(fresh_provider, wallet));
 
-    let address: Address = contract_address_str.parse().unwrap();
+    // Deploy contract directly using ethers-rs ContractFactory
+    let factory = ethers::contract::ContractFactory::new(abi, bytecode, signer.clone());
+    let contract = factory.deploy(())
+        .expect("Failed to create contract deployment tx")
+        .send()
+        .await
+        .expect("Failed to deploy contract");
+
+    let address = contract.address();
+    let address_str = format!("{:?}", address);
+
+    let client = ContractClient::new(HARDHAT_RPC_URL, &address_str)
+        .expect("Failed to create ContractClient");
+
     (client, address, signer)
 }
 
