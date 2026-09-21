@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { useAccount } from "wagmi";
 
 export type AccessGrantItem = {
@@ -18,29 +18,32 @@ type VaultAccessMatrixProps = {
   onRevokeAccess?: (vaultId: string, grantee: string) => Promise<void>;
 };
 
+// Fixed baseline timestamp to ensure deterministic server rendering & hydration
+const BASE_NOW = 1758450000;
+
 const DEFAULT_GRANTS: AccessGrantItem[] = [
   {
     vaultId: "0",
     vaultName: "Production DB Credentials",
     grantee: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
-    grantedAt: new Date(Date.now() - 3600000).toISOString(),
-    expiryTimestamp: Math.floor((Date.now() + 7200000) / 1000),
+    grantedAt: new Date(BASE_NOW * 1000 - 3600000).toISOString(),
+    expiryTimestamp: BASE_NOW + 7200, // 2h remaining relative to baseline
     status: "active",
   },
   {
     vaultId: "1",
     vaultName: "Staging API Master Key",
     grantee: "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
-    grantedAt: new Date(Date.now() - 86400000).toISOString(),
-    expiryTimestamp: Math.floor((Date.now() - 3600000) / 1000),
+    grantedAt: new Date(BASE_NOW * 1000 - 86400000).toISOString(),
+    expiryTimestamp: BASE_NOW - 3600, // Expired
     status: "expired",
   },
   {
     vaultId: "2",
     vaultName: "AWS KMS Root Tokens",
     grantee: "0x90F79bf6EB2c4f870365E785982E1f101E93b906",
-    grantedAt: new Date(Date.now() - 172800000).toISOString(),
-    expiryTimestamp: Math.floor((Date.now() + 86400000) / 1000),
+    grantedAt: new Date(BASE_NOW * 1000 - 172800000).toISOString(),
+    expiryTimestamp: BASE_NOW + 86400, // 24h remaining
     status: "active",
   },
 ];
@@ -54,6 +57,17 @@ export default function VaultAccessMatrix({
   const [items, setItems] = useState<AccessGrantItem[]>(grants);
   const [filter, setFilter] = useState<"all" | "active" | "expired">("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [mounted, setMounted] = useState(false);
+  const [nowSeconds, setNowSeconds] = useState<number>(BASE_NOW);
+
+  useEffect(() => {
+    setMounted(true);
+    setNowSeconds(Math.floor(Date.now() / 1000));
+    const interval = setInterval(() => {
+      setNowSeconds(Math.floor(Date.now() / 1000));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
   
   // Grant Modal state
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -65,7 +79,7 @@ export default function VaultAccessMatrix({
   // Filtered grants
   const filteredGrants = useMemo(() => {
     return items.filter((grant) => {
-      const now = Math.floor(Date.now() / 1000);
+      const now = nowSeconds || BASE_NOW;
       const isExpired = grant.expiryTimestamp <= now || grant.status === "expired";
       const currentStatus = grant.status === "revoked" ? "revoked" : isExpired ? "expired" : "active";
 
@@ -82,7 +96,7 @@ export default function VaultAccessMatrix({
       }
       return true;
     });
-  }, [items, filter, searchQuery]);
+  }, [items, filter, searchQuery, nowSeconds]);
 
   async function handleRevoke(vaultId: string, grantee: string) {
     if (onRevokeAccess) {
@@ -124,7 +138,8 @@ export default function VaultAccessMatrix({
   }
 
   function formatTimeRemaining(expiryEpochSeconds: number) {
-    const diff = expiryEpochSeconds - Math.floor(Date.now() / 1000);
+    const currentNow = nowSeconds || BASE_NOW;
+    const diff = expiryEpochSeconds - currentNow;
     if (diff <= 0) return "Expired";
     const hours = Math.floor(diff / 3600);
     const mins = Math.floor((diff % 3600) / 60);
@@ -200,7 +215,7 @@ export default function VaultAccessMatrix({
           </div>
         ) : (
           filteredGrants.map((grant) => {
-            const now = Math.floor(Date.now() / 1000);
+            const now = nowSeconds || BASE_NOW;
             const isExpired = grant.expiryTimestamp <= now || grant.status === "expired";
             const isRevoked = grant.status === "revoked";
             const isActive = !isExpired && !isRevoked;
@@ -261,7 +276,10 @@ export default function VaultAccessMatrix({
                 <div className="mt-5 pt-3 border-t border-slate-800/60 flex items-center justify-between text-xs font-mono">
                   <div className="text-slate-400">
                     <span className="block text-[10px] text-slate-500 uppercase">Time Status</span>
-                    <span className={`font-semibold ${isActive ? "text-cyan-400" : "text-slate-500"}`}>
+                    <span
+                      suppressHydrationWarning
+                      className={`font-semibold ${isActive ? "text-cyan-400" : "text-slate-500"}`}
+                    >
                       {formatTimeRemaining(grant.expiryTimestamp)}
                     </span>
                   </div>
