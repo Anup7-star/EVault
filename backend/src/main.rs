@@ -47,6 +47,11 @@ async fn main() -> anyhow::Result<()> {
         .parse()
         .expect("PORT must be a valid port number");
 
+    let rpc_url = std::env::var("RPC_URL")
+        .expect("RPC_URL must be set");
+    let contract_address = std::env::var("CONTRACT_ADDRESS")
+        .expect("CONTRACT_ADDRESS must be set");
+
     // 4. Postgres connection pool
     info!("Connecting to Postgres…");
     let pool = PgPoolOptions::new()
@@ -63,10 +68,16 @@ async fn main() -> anyhow::Result<()> {
         .expect("Failed to apply migrations");
     info!("Migrations applied successfully");
 
+    info!("Initializing blockchain contract client...");
+    let contract_client = evault_backend::blockchain::contract_client::ContractClient::new(&rpc_url, &contract_address)
+        .expect("Failed to initialize contract client");
+    let shared_contract_client = std::sync::Arc::new(contract_client);
+
     // 6. Build router
     let app = Router::new()
         // Health-check — simplest possible, no DB dependency
-        .route("/health", get(health));
+        .route("/health", get(health))
+        .with_state(shared_contract_client);
     // Future: .merge(api::auth::router(pool.clone()))
     //         .merge(api::vaults::router(pool.clone()))
     //         .merge(api::permissions::router(pool.clone()))
