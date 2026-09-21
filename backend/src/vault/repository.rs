@@ -8,23 +8,43 @@ pub async fn store_secret(
     payload: EncryptedPayload,
 ) -> sqlx::Result<()> {
     // We expect IV to be 12 bytes exactly.
-    sqlx::query!(
-        r#"
-        INSERT INTO encrypted_secrets (vault_id, ciphertext, iv, auth_tag, updated_at)
-        VALUES ($1, $2, $3, $4, NOW())
-        ON CONFLICT (vault_id) DO UPDATE
-        SET ciphertext = EXCLUDED.ciphertext,
-            iv = EXCLUDED.iv,
-            auth_tag = EXCLUDED.auth_tag,
-            updated_at = NOW()
-        "#,
-        vault_id,
-        payload.ciphertext,
-        &payload.iv[..],
-        payload.auth_tag,
+    let existing = sqlx::query!(
+        "SELECT id FROM encrypted_secrets WHERE vault_id = $1",
+        vault_id
     )
-    .execute(pool)
+    .fetch_optional(pool)
     .await?;
+
+    if let Some(row) = existing {
+        sqlx::query!(
+            r#"
+            UPDATE encrypted_secrets
+            SET ciphertext = $1, iv = $2, auth_tag = $3, updated_at = NOW()
+            WHERE id = $4
+            "#,
+            payload.ciphertext,
+            &payload.iv[..],
+            payload.auth_tag,
+            row.id
+        )
+        .execute(pool)
+        .await?;
+    } else {
+        let new_id = Uuid::new_v4();
+        sqlx::query!(
+            r#"
+            INSERT INTO encrypted_secrets (id, vault_id, ciphertext, iv, auth_tag, updated_at)
+            VALUES ($1, $2, $3, $4, $5, NOW())
+            "#,
+            new_id,
+            vault_id,
+            payload.ciphertext,
+            &payload.iv[..],
+            payload.auth_tag,
+        )
+        .execute(pool)
+        .await?;
+    }
 
     Ok(())
 }
