@@ -12,12 +12,7 @@ use std::net::SocketAddr;
 use tracing::info;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
-mod api;
-mod audit;
-mod auth;
-mod blockchain;
-mod encryption;
-mod vault;
+use evault_backend::*;
 
 // ── Health-check ─────────────────────────────────────────────────────────────
 

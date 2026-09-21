@@ -1,18 +1,87 @@
-//! Auth nonce generation and lifecycle management (stored in `auth_nonces`).
+use crate::auth::AuthError;
+use rand::{distributions::Alphanumeric, Rng};
+use sqlx::PgPool;
+use chrono::{Duration, Utc};
+use uuid::Uuid;
 
-// TODO: generate cryptographically-random nonce and persist to DB
-// TODO: look up nonce by wallet_address — return None if expired or already used
-// TODO: mark nonce as used (set used_at = NOW())
-// TODO: purge expired nonces (background task)
-
-pub async fn generate_nonce() {
-    // TODO
+pub fn generate_nonce() -> String {
+    // Generate a random 16-character alphanumeric string per EIP-4361 (min 8)
+    rand::thread_rng()
+        .sample_iter(&Alphanumeric)
+        .take(16)
+        .map(char::from)
+        .collect()
 }
 
-pub async fn validate_nonce() {
-    // TODO
+pub async fn store_nonce(
+    pool: &PgPool,
+    wallet_address: &str,
+    nonce: &str,
+    ttl_seconds: i64,
+) -> Result<(), AuthError> {
+    let id = Uuid::new_v4();
+    let expires_at = Utc::now() + Duration::seconds(ttl_seconds);
+
+    sqlx::query!(
+        r#"
+        INSERT INTO auth_nonces (id, wallet_address, nonce, expires_at)
+        VALUES ($1, $2, $3, $4)
+        "#,
+        id,
+        wallet_address,
+        nonce,
+        expires_at,
+    )
+    .execute(pool)
+    .await?;
+
+    Ok(())
 }
 
-pub async fn consume_nonce() {
-    // TODO
+pub async fn consume_nonce(
+    pool: &PgPool,
+    wallet_address: &str,
+    nonce: &str,
+) -> Result<(), AuthError> {
+    let mut tx = pool.begin().await?;
+
+    let row = sqlx::query!(
+        r#"
+        SELECT id, expires_at, used_at
+        FROM auth_nonces
+        WHERE wallet_address = $1 AND nonce = $2
+        FOR UPDATE
+        "#,
+        wallet_address,
+        nonce
+    )
+    .fetch_optional(&mut *tx)
+    .await?;
+
+    if let Some(record) = row {
+        let now = Utc::now();
+        if record.used_at.is_some() {
+            return Err(AuthError::NonceUsed);
+        }
+        if record.expires_at < now {
+            return Err(AuthError::NonceExpired);
+        }
+
+        sqlx::query!(
+            r#"
+            UPDATE auth_nonces
+            SET used_at = $1
+            WHERE id = $2
+            "#,
+            now,
+            record.id
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        tx.commit().await?;
+        Ok(())
+    } else {
+        Err(AuthError::InvalidNonce)
+    }
 }

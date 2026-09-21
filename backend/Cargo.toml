@@ -41,3 +41,15 @@ dotenvy        = "0.15"
 # ── Error handling ────────────────────────────────────────────────────────────
 anyhow         = "1"
 thiserror      = "1"
+siwe = "0.6.1"
+ethers = "2.0.4"
+rand = "0.8"
+sha2 = "0.11.0"
+hex = "0.4.3"
+jsonwebtoken = "9.3.0"
+time = "0.3.36"
+tower = "0.5.3"
+http-body-util = "0.1.5"
+
+[dev-dependencies]
+reqwest = { version = "0.13.5", features = ["json"] }
