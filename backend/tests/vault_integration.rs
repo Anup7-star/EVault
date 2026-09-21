@@ -101,12 +101,12 @@ async fn siwe_login(base_url: &str, client: &Client, wallet: &LocalWallet) -> St
         .unwrap();
 
     let siwe_msg = siwe::Message {
-        domain: "localhost".parse().unwrap(),
+        domain: "localhost:3000".parse().unwrap(),
         address: wallet.address().0,
         statement: Some("Sign in to EVault".into()),
-        uri: "http://localhost".parse().unwrap(),
+        uri: "http://localhost:3000".parse().unwrap(),
         version: siwe::Version::V1,
-        chain_id: 1,
+        chain_id: 31337,
         nonce: nonce_res.nonce.clone(),
         issued_at: OffsetDateTime::now_utc().into(),
         expiration_time: None,

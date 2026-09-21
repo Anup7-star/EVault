@@ -60,12 +60,12 @@ async fn test_siwe_auth_flow(pool: PgPool) {
 
     let issued_at = OffsetDateTime::now_utc();
     let siwe_msg = siwe::Message {
-        domain: "localhost".parse().unwrap(),
+        domain: "localhost:3000".parse().unwrap(),
         address: wallet.address().0,
         statement: Some("Sign in to EVault".into()),
-        uri: "http://localhost".parse().unwrap(),
+        uri: "http://localhost:3000".parse().unwrap(),
         version: siwe::Version::V1,
-        chain_id: 1,
+        chain_id: 31337,
         nonce: nonce.clone(),
         issued_at: issued_at.into(),
         expiration_time: None,
@@ -108,12 +108,12 @@ async fn test_reused_nonce_fails(pool: PgPool) {
 
     let issued_at = OffsetDateTime::now_utc();
     let siwe_msg = siwe::Message {
-        domain: "localhost".parse().unwrap(),
+        domain: "localhost:3000".parse().unwrap(),
         address: wallet.address().0,
         statement: Some("Sign in to EVault".into()),
-        uri: "http://localhost".parse().unwrap(),
+        uri: "http://localhost:3000".parse().unwrap(),
         version: siwe::Version::V1,
-        chain_id: 1,
+        chain_id: 31337,
         nonce: nonce.clone(),
         issued_at: issued_at.into(),
         expiration_time: None,
@@ -163,12 +163,12 @@ async fn test_expired_nonce_fails(pool: PgPool) {
 
     let issued_at = OffsetDateTime::now_utc();
     let siwe_msg = siwe::Message {
-        domain: "localhost".parse().unwrap(),
+        domain: "localhost:3000".parse().unwrap(),
         address: wallet.address().0,
         statement: Some("Sign in to EVault".into()),
-        uri: "http://localhost".parse().unwrap(),
+        uri: "http://localhost:3000".parse().unwrap(),
         version: siwe::Version::V1,
-        chain_id: 1,
+        chain_id: 31337,
         nonce,
         issued_at: issued_at.into(),
         expiration_time: None,
@@ -199,9 +199,9 @@ async fn test_wrong_domain_fails(pool: PgPool) {
         domain: "bad-domain.com".parse().unwrap(),
         address: wallet.address().0,
         statement: Some("Sign in to EVault".into()),
-        uri: "http://localhost".parse().unwrap(),
+        uri: "http://localhost:3000".parse().unwrap(),
         version: siwe::Version::V1,
-        chain_id: 1,
+        chain_id: 31337,
         nonce,
         issued_at: OffsetDateTime::now_utc().into(),
         expiration_time: None,
@@ -229,10 +229,10 @@ async fn test_wrong_chain_id_fails(pool: PgPool) {
     let (wallet, _, nonce) = generate_wallet_and_nonce(&base_url, &client).await;
 
     let siwe_msg = siwe::Message {
-        domain: "localhost".parse().unwrap(),
+        domain: "localhost:3000".parse().unwrap(),
         address: wallet.address().0,
         statement: Some("Sign in to EVault".into()),
-        uri: "http://localhost".parse().unwrap(),
+        uri: "http://localhost:3000".parse().unwrap(),
         version: siwe::Version::V1,
         chain_id: 999, // Wrong chain id
         nonce,
@@ -262,12 +262,12 @@ async fn test_tampered_signature_fails(pool: PgPool) {
     let (wallet, _, nonce) = generate_wallet_and_nonce(&base_url, &client).await;
 
     let siwe_msg = siwe::Message {
-        domain: "localhost".parse().unwrap(),
+        domain: "localhost:3000".parse().unwrap(),
         address: wallet.address().0,
         statement: Some("Sign in to EVault".into()),
-        uri: "http://localhost".parse().unwrap(),
+        uri: "http://localhost:3000".parse().unwrap(),
         version: siwe::Version::V1,
-        chain_id: 1,
+        chain_id: 31337,
         nonce,
         issued_at: OffsetDateTime::now_utc().into(),
         expiration_time: None,
@@ -311,12 +311,12 @@ async fn test_revoked_session_rejected(pool: PgPool) {
     let (wallet, _, nonce) = generate_wallet_and_nonce(&base_url, &client).await;
 
     let siwe_msg = siwe::Message {
-        domain: "localhost".parse().unwrap(),
+        domain: "localhost:3000".parse().unwrap(),
         address: wallet.address().0,
         statement: Some("Sign in to EVault".into()),
-        uri: "http://localhost".parse().unwrap(),
+        uri: "http://localhost:3000".parse().unwrap(),
         version: siwe::Version::V1,
-        chain_id: 1,
+        chain_id: 31337,
         nonce,
         issued_at: OffsetDateTime::now_utc().into(),
         expiration_time: None,

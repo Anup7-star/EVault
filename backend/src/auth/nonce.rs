@@ -1,4 +1,5 @@
 use crate::auth::AuthError;
+use crate::utils::normalize_address;
 use chrono::{Duration, Utc};
 use rand::{distributions::Alphanumeric, Rng};
 use sqlx::PgPool;
@@ -21,6 +22,7 @@ pub async fn store_nonce(
 ) -> Result<(), AuthError> {
     let id = Uuid::new_v4();
     let expires_at = Utc::now() + Duration::seconds(ttl_seconds);
+    let normalized_wallet = normalize_address(wallet_address);
 
     sqlx::query!(
         r#"
@@ -28,7 +30,7 @@ pub async fn store_nonce(
         VALUES ($1, $2, $3, $4)
         "#,
         id,
-        wallet_address,
+        normalized_wallet,
         nonce,
         expires_at,
     )
@@ -44,6 +46,7 @@ pub async fn consume_nonce(
     nonce: &str,
 ) -> Result<(), AuthError> {
     let mut tx = pool.begin().await?;
+    let normalized_wallet = normalize_address(wallet_address);
 
     let row = sqlx::query!(
         r#"
@@ -52,7 +55,7 @@ pub async fn consume_nonce(
         WHERE wallet_address = $1 AND nonce = $2
         FOR UPDATE
         "#,
-        wallet_address,
+        normalized_wallet,
         nonce
     )
     .fetch_optional(&mut *tx)

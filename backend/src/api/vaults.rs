@@ -29,6 +29,7 @@ use crate::{
     audit::{record, AuditAction, AuditEvent},
     blockchain::contract_client::{AuthzResult, ContractClient},
     encryption::{decrypt, encrypt, load_encryption_key},
+    utils::normalize_address,
     vault::repository::{get_secret, store_secret},
 };
 
@@ -167,7 +168,7 @@ pub async fn create_vault(
     Json(body): Json<CreateVaultRequest>,
 ) -> Result<(StatusCode, Json<VaultResponse>), VaultError> {
     let request_id = extract_request_id(&headers);
-    let owner_wallet = wallet.0.clone();
+    let owner_wallet = normalize_address(&wallet.0);
 
     // Orphan-resource risk: if this endpoint is called but the on-chain vault doesn't
     // actually exist yet at the given blockchainVaultId, later access checks will fail
@@ -260,7 +261,7 @@ pub async fn list_vaults(
 
     let mut items = Vec::new();
     for row in rows {
-        if row.owner_wallet.to_lowercase() == caller.to_lowercase() {
+        if row.owner_wallet == *caller {
             // Owner sees their vaults without role/expiry
             items.push(VaultListItem {
                 id: row.id,
@@ -317,7 +318,7 @@ pub async fn get_vault(
     .ok_or(VaultError::NotFound)?;
 
     // Check authorization: owner OR active on-chain permission
-    let is_owner = row.owner_wallet.to_lowercase() == caller.to_lowercase();
+    let is_owner = row.owner_wallet == *caller;
     if !is_owner {
         let caller_addr: Address = caller
             .parse()
@@ -477,7 +478,7 @@ pub async fn list_permissions(
         .await?
         .ok_or(VaultError::NotFound)?;
 
-    if row.owner_wallet.to_lowercase() != caller.to_lowercase() {
+    if row.owner_wallet != *caller {
         return Err(VaultError::Forbidden("Owner only".to_string()));
     }
 
@@ -523,11 +524,12 @@ pub async fn grant_permission(
         .await?
         .ok_or(VaultError::NotFound)?;
 
-    if row.owner_wallet.to_lowercase() != caller.to_lowercase() {
+    if row.owner_wallet != *caller {
         return Err(VaultError::Forbidden("Owner only".to_string()));
     }
 
     let role_str = body.role.to_string();
+    let normalized_grantee = normalize_address(&body.wallet_address);
 
     // Upsert local permissions projection
     let perm_id = Uuid::new_v4();
@@ -544,7 +546,7 @@ pub async fn grant_permission(
         "#,
         perm_id,
         vault_id,
-        body.wallet_address,
+        normalized_grantee,
         role_str,
         body.expires_at,
         caller,
@@ -560,7 +562,7 @@ pub async fn grant_permission(
             vault_id: Some(vault_id),
             request_id: Some(request_id),
             metadata: Some(json!({
-                "grantee": body.wallet_address,
+                "grantee": normalized_grantee,
                 "role": body.role,
                 "expires_at": body.expires_at.to_rfc3339(),
             })),
@@ -588,9 +590,11 @@ pub async fn revoke_permission(
         .await?
         .ok_or(VaultError::NotFound)?;
 
-    if row.owner_wallet.to_lowercase() != caller.to_lowercase() {
+    if row.owner_wallet != *caller {
         return Err(VaultError::Forbidden("Owner only".to_string()));
     }
+
+    let normalized_grantee = normalize_address(&grantee_wallet);
 
     sqlx::query!(
         r#"
@@ -598,7 +602,7 @@ pub async fn revoke_permission(
         WHERE vault_id = $1 AND wallet_address = $2
         "#,
         vault_id,
-        grantee_wallet,
+        normalized_grantee,
     )
     .execute(&state.pool)
     .await?;
@@ -610,7 +614,7 @@ pub async fn revoke_permission(
             wallet_address: Some(&caller),
             vault_id: Some(vault_id),
             request_id: Some(request_id),
-            metadata: Some(json!({"revoked_wallet": grantee_wallet})),
+            metadata: Some(json!({"revoked_wallet": normalized_grantee})),
         },
     )
     .await;

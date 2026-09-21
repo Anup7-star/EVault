@@ -4,3 +4,4 @@ pub mod auth;
 pub mod blockchain;
 pub mod encryption;
 pub mod vault;
+pub mod utils;

@@ -1,4 +1,5 @@
 use crate::auth::AuthError;
+use crate::utils::normalize_address;
 use chrono::{Duration, Utc};
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
@@ -21,9 +22,10 @@ pub async fn issue_session(
 ) -> Result<String, AuthError> {
     let now = Utc::now();
     let expires_at = now + Duration::days(1);
+    let normalized_wallet = normalize_address(wallet_address);
 
     let claims = Claims {
-        wallet_address: wallet_address.to_string(),
+        wallet_address: normalized_wallet.clone(),
         exp: expires_at.timestamp() as usize,
         iat: now.timestamp() as usize,
     };
@@ -46,7 +48,7 @@ pub async fn issue_session(
         VALUES ($1, $2, $3, $4, $5)
         "#,
         id,
-        wallet_address,
+        normalized_wallet,
         token_hash,
         expires_at,
         now
