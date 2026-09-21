@@ -27,9 +27,9 @@ impl IntoResponse for AuthError {
     fn into_response(self) -> Response {
         let (status, message) = match &self {
             AuthError::Database(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Database error"),
-            AuthError::InvalidNonce => (StatusCode::BAD_REQUEST, "Invalid nonce"),
-            AuthError::NonceExpired => (StatusCode::BAD_REQUEST, "Nonce expired"),
-            AuthError::NonceUsed => (StatusCode::BAD_REQUEST, "Nonce already used"),
+            AuthError::InvalidNonce => (StatusCode::UNAUTHORIZED, "Invalid nonce"),
+            AuthError::NonceExpired => (StatusCode::UNAUTHORIZED, "Nonce expired"),
+            AuthError::NonceUsed => (StatusCode::UNAUTHORIZED, "Nonce already used"),
             AuthError::InvalidSignature(msg) => (StatusCode::UNAUTHORIZED, msg.as_str()),
             AuthError::SessionRevoked => (StatusCode::UNAUTHORIZED, "Session revoked"),
             AuthError::InvalidToken => (StatusCode::UNAUTHORIZED, "Invalid session token"),

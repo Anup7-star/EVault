@@ -46,6 +46,7 @@ ethers = "2.0.4"
 rand = "0.8"
 sha2 = "0.11.0"
 hex = "0.4.3"
+# Pinned to 9.3.0 because v11+ requires explicit CryptoProvider initialization which complicates tests
 jsonwebtoken = "9.3.0"
 time = "0.3.36"
 tower = "0.5.3"
