@@ -23,12 +23,16 @@ pub async fn verify_siwe(
 
     let now = OffsetDateTime::now_utc();
     if !msg.valid_at(&now) {
-        return Err(AuthError::InvalidSignature("Message is expired or not yet valid".into()));
+        return Err(AuthError::InvalidSignature(
+            "Message is expired or not yet valid".into(),
+        ));
     }
 
     let issued_at = msg.issued_at.as_ref();
     if now - *issued_at > time::Duration::minutes(5) {
-        return Err(AuthError::InvalidSignature("Message was issued too long ago".into()));
+        return Err(AuthError::InvalidSignature(
+            "Message was issued too long ago".into(),
+        ));
     }
 
     let sig_bytes = hex::decode(signature.trim_start_matches("0x"))
@@ -39,7 +43,8 @@ pub async fn verify_siwe(
         .try_into()
         .map_err(|_| AuthError::InvalidSignature("Invalid signature length".into()))?;
 
-    let _verified = msg.verify_eip191(sig_array)
+    let _verified = msg
+        .verify_eip191(sig_array)
         .map_err(|_| AuthError::InvalidSignature("Signature verification failed".into()))?;
 
     // The siwe crate returns the recovered bytes on success or we can just get from msg.address

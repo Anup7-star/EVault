@@ -49,10 +49,7 @@ pub async fn store_secret(
     Ok(())
 }
 
-pub async fn get_secret(
-    pool: &PgPool,
-    vault_id: Uuid,
-) -> sqlx::Result<Option<EncryptedPayload>> {
+pub async fn get_secret(pool: &PgPool, vault_id: Uuid) -> sqlx::Result<Option<EncryptedPayload>> {
     let row = sqlx::query!(
         r#"
         SELECT ciphertext, iv, auth_tag
@@ -70,7 +67,7 @@ pub async fn get_secret(
             iv.copy_from_slice(&record.iv);
         } else {
             // Technically a corruption/schema mismatch, but sqlx guarantees bytea as Vec<u8>
-            return Ok(None); 
+            return Ok(None);
         }
 
         Ok(Some(EncryptedPayload {

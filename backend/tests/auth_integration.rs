@@ -36,7 +36,10 @@ async fn setup_app(pool: PgPool) -> (String, Client, PgPool) {
     (format!("http://{}", addr), Client::new(), pool)
 }
 
-async fn generate_wallet_and_nonce(base_url: &str, client: &Client) -> (LocalWallet, String, String) {
+async fn generate_wallet_and_nonce(
+    base_url: &str,
+    client: &Client,
+) -> (LocalWallet, String, String) {
     let wallet = LocalWallet::new(&mut rand::thread_rng());
     let address = format!("0x{}", hex::encode(wallet.address().as_bytes()));
 
@@ -76,10 +79,7 @@ async fn test_siwe_auth_flow(pool: PgPool) {
 
     let verify_res = client
         .post(format!("{}/auth/verify", base_url))
-        .json(&VerifyRequest {
-            message,
-            signature,
-        })
+        .json(&VerifyRequest { message, signature })
         .send()
         .await
         .unwrap();
@@ -87,7 +87,7 @@ async fn test_siwe_auth_flow(pool: PgPool) {
     assert!(verify_res.status().is_success());
     let verify_data: VerifyResponse = verify_res.json().await.unwrap();
     assert!(verify_data.authenticated);
-    
+
     let token = verify_data.token;
 
     let protected_res = client
@@ -128,7 +128,10 @@ async fn test_reused_nonce_fails(pool: PgPool) {
     // First attempt works
     client
         .post(format!("{}/auth/verify", base_url))
-        .json(&VerifyRequest { message: message.clone(), signature: signature.clone() })
+        .json(&VerifyRequest {
+            message: message.clone(),
+            signature: signature.clone(),
+        })
         .send()
         .await
         .unwrap();
@@ -278,7 +281,10 @@ async fn test_tampered_signature_fails(pool: PgPool) {
 
     let verify_res = client
         .post(format!("{}/auth/verify", base_url))
-        .json(&VerifyRequest { message, signature: tampered_sig.into() })
+        .json(&VerifyRequest {
+            message,
+            signature: tampered_sig.into(),
+        })
         .send()
         .await
         .unwrap();
@@ -338,7 +344,9 @@ async fn test_revoked_session_rejected(pool: PgPool) {
     let token_hash = hex::encode(hasher.finalize());
 
     // Revoke the session programmatically by directly calling db logic, since we don't have an endpoint yet
-    evault_backend::auth::session::revoke_session(&pool, &token_hash).await.unwrap();
+    evault_backend::auth::session::revoke_session(&pool, &token_hash)
+        .await
+        .unwrap();
 
     let protected_res = client
         .get(format!("{}/protected", base_url))

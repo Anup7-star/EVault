@@ -21,17 +21,15 @@ pub enum EncryptionError {
 
 // Prototype limitation: single static key from env. Production requires KMS-backed key generation/rotation per TRD §10 — not solved here.
 pub fn load_encryption_key() -> [u8; 32] {
-    let hex_key = std::env::var("ENCRYPTION_KEY_HEX")
-        .expect("ENCRYPTION_KEY_HEX must be set");
-    
+    let hex_key = std::env::var("ENCRYPTION_KEY_HEX").expect("ENCRYPTION_KEY_HEX must be set");
+
     if hex_key.len() != 64 {
         panic!("ENCRYPTION_KEY_HEX must be exactly 64 characters (32 bytes)");
     }
 
     let mut key = [0u8; 32];
-    hex::decode_to_slice(&hex_key, &mut key)
-        .expect("ENCRYPTION_KEY_HEX must be valid hex");
-    
+    hex::decode_to_slice(&hex_key, &mut key).expect("ENCRYPTION_KEY_HEX must be valid hex");
+
     key
 }
 

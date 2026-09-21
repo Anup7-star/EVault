@@ -57,11 +57,7 @@ pub async fn issue_session(
     Ok(token)
 }
 
-pub async fn verify_session(
-    pool: &PgPool,
-    token: &str,
-    secret: &str,
-) -> Result<String, AuthError> {
+pub async fn verify_session(pool: &PgPool, token: &str, secret: &str) -> Result<String, AuthError> {
     let mut validation = Validation::default();
     validation.validate_exp = true;
 

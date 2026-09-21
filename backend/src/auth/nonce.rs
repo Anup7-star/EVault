@@ -1,7 +1,7 @@
 use crate::auth::AuthError;
+use chrono::{Duration, Utc};
 use rand::{distributions::Alphanumeric, Rng};
 use sqlx::PgPool;
-use chrono::{Duration, Utc};
 use uuid::Uuid;
 
 pub fn generate_nonce() -> String {

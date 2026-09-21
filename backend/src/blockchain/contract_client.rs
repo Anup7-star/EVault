@@ -2,10 +2,7 @@ use ethers::prelude::*;
 use std::sync::Arc;
 use thiserror::Error;
 
-abigen!(
-    VaultAccessRegistry,
-    "abi/VaultAccessRegistry.json"
-);
+abigen!(VaultAccessRegistry, "abi/VaultAccessRegistry.json");
 
 #[derive(Debug, Error)]
 pub enum ContractError {

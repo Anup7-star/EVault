@@ -28,31 +28,27 @@ async fn main() -> anyhow::Result<()> {
 
     // 2. Structured JSON logging — level driven by RUST_LOG env var
     tracing_subscriber::registry()
-        .with(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new("info")),
-        )
+        .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
         .with(tracing_subscriber::fmt::layer().json())
         .init();
 
-    info!(version = env!("CARGO_PKG_VERSION"), "EVault backend starting");
+    info!(
+        version = env!("CARGO_PKG_VERSION"),
+        "EVault backend starting"
+    );
 
     // 3. Config from environment
-    let database_url = std::env::var("DATABASE_URL")
-        .expect("DATABASE_URL must be set");
+    let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
 
     let port: u16 = std::env::var("PORT")
         .unwrap_or_else(|_| "3001".to_string())
         .parse()
         .expect("PORT must be a valid port number");
 
-    let rpc_url = std::env::var("RPC_URL")
-        .expect("RPC_URL must be set");
-    let contract_address = std::env::var("CONTRACT_ADDRESS")
-        .expect("CONTRACT_ADDRESS must be set");
+    let rpc_url = std::env::var("RPC_URL").expect("RPC_URL must be set");
+    let contract_address = std::env::var("CONTRACT_ADDRESS").expect("CONTRACT_ADDRESS must be set");
 
-    let session_secret = std::env::var("SESSION_SECRET")
-        .expect("SESSION_SECRET must be set");
+    let session_secret = std::env::var("SESSION_SECRET").expect("SESSION_SECRET must be set");
 
     // 4. Postgres connection pool
     info!("Connecting to Postgres…");
@@ -75,16 +71,26 @@ async fn main() -> anyhow::Result<()> {
 
     // 7. Blockchain contract client
     info!("Initializing blockchain contract client...");
-    let contract_client = evault_backend::blockchain::contract_client::ContractClient::new(&rpc_url, &contract_address)
-        .expect("Failed to initialize contract client");
+    let contract_client = evault_backend::blockchain::contract_client::ContractClient::new(
+        &rpc_url,
+        &contract_address,
+    )
+    .expect("Failed to initialize contract client");
     let shared_contract_client = Arc::new(contract_client);
 
     // 8. Build router with middleware stack
     // Order: Request ID -> Logging -> Router (which does auth -> handler)
     let app = Router::new()
         .route("/health", get(health))
-        .merge(evault_backend::api::auth::router(pool.clone(), session_secret.clone()))
-        .merge(evault_backend::api::vaults::router(pool.clone(), shared_contract_client, session_secret))
+        .merge(evault_backend::api::auth::router(
+            pool.clone(),
+            session_secret.clone(),
+        ))
+        .merge(evault_backend::api::vaults::router(
+            pool.clone(),
+            shared_contract_client,
+            session_secret,
+        ))
         .layer(
             tower_http::trace::TraceLayer::new_for_http().make_span_with(
                 |request: &axum::http::Request<axum::body::Body>| {

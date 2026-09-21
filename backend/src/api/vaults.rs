@@ -44,8 +44,12 @@ pub struct VaultState {
 }
 
 impl crate::api::auth::HasAuthState for VaultState {
-    fn pool(&self) -> &PgPool { &self.pool }
-    fn session_secret(&self) -> &str { &self.session_secret }
+    fn pool(&self) -> &PgPool {
+        &self.pool
+    }
+    fn session_secret(&self) -> &str {
+        &self.session_secret
+    }
 }
 
 // ── Error type ───────────────────────────────────────────────────────────────
@@ -74,9 +78,7 @@ impl IntoResponse for VaultError {
             VaultError::ServiceUnavailable(msg) => {
                 (StatusCode::SERVICE_UNAVAILABLE, json!({"error": msg}))
             }
-            VaultError::Internal(msg) => {
-                (StatusCode::INTERNAL_SERVER_ERROR, json!({"error": msg}))
-            }
+            VaultError::Internal(msg) => (StatusCode::INTERNAL_SERVER_ERROR, json!({"error": msg})),
             VaultError::BadRequest(msg) => (StatusCode::BAD_REQUEST, json!({"error": msg})),
             VaultError::Database(e) => {
                 tracing::error!(error = %e, "Database error");
@@ -252,7 +254,9 @@ pub async fn list_vaults(
     .fetch_all(&state.pool)
     .await?;
 
-    let caller_addr: Address = caller.parse().map_err(|_| VaultError::BadRequest("Invalid wallet address".into()))?;
+    let caller_addr: Address = caller
+        .parse()
+        .map_err(|_| VaultError::BadRequest("Invalid wallet address".into()))?;
 
     let mut items = Vec::new();
     for row in rows {
@@ -269,7 +273,11 @@ pub async fn list_vaults(
             });
         } else {
             // Check on-chain permission — demo-scale, no caching
-            match state.contract.get_permission(row.blockchain_vault_id as u64, caller_addr).await {
+            match state
+                .contract
+                .get_permission(row.blockchain_vault_id as u64, caller_addr)
+                .await
+            {
                 Ok((true, expires_at, role)) => {
                     items.push(VaultListItem {
                         id: row.id,
@@ -314,7 +322,11 @@ pub async fn get_vault(
         let caller_addr: Address = caller
             .parse()
             .map_err(|_| VaultError::Forbidden("Invalid wallet address".into()))?;
-        match state.contract.get_permission(row.blockchain_vault_id as u64, caller_addr).await {
+        match state
+            .contract
+            .get_permission(row.blockchain_vault_id as u64, caller_addr)
+            .await
+        {
             Ok((true, _, _)) => {}
             _ => return Err(VaultError::Forbidden("Access denied".into())),
         }
@@ -358,7 +370,10 @@ pub async fn get_vault_secret(
         .parse()
         .map_err(|_| VaultError::Forbidden("Invalid wallet address".into()))?;
 
-    let authz = state.contract.checked_authorize(row.blockchain_vault_id as u64, caller_addr).await;
+    let authz = state
+        .contract
+        .checked_authorize(row.blockchain_vault_id as u64, caller_addr)
+        .await;
     match authz {
         AuthzResult::ChainUnavailable => {
             // Fail closed — 503, log nothing sensitive
@@ -384,7 +399,9 @@ pub async fn get_vault_secret(
                 },
             )
             .await;
-            return Err(VaultError::Forbidden("Access denied or expired".to_string()));
+            return Err(VaultError::Forbidden(
+                "Access denied or expired".to_string(),
+            ));
         }
         AuthzResult::Allowed { .. } => {
             // Authorized — continue to ciphertext retrieval
@@ -455,13 +472,10 @@ pub async fn list_permissions(
     let caller = &wallet.0;
 
     // Verify owner
-    let row = sqlx::query!(
-        r#"SELECT owner_wallet FROM vaults WHERE id = $1"#,
-        vault_id
-    )
-    .fetch_optional(&state.pool)
-    .await?
-    .ok_or(VaultError::NotFound)?;
+    let row = sqlx::query!(r#"SELECT owner_wallet FROM vaults WHERE id = $1"#, vault_id)
+        .fetch_optional(&state.pool)
+        .await?
+        .ok_or(VaultError::NotFound)?;
 
     if row.owner_wallet.to_lowercase() != caller.to_lowercase() {
         return Err(VaultError::Forbidden("Owner only".to_string()));
@@ -504,13 +518,10 @@ pub async fn grant_permission(
     let caller = wallet.0.clone();
 
     // Verify owner
-    let row = sqlx::query!(
-        r#"SELECT owner_wallet FROM vaults WHERE id = $1"#,
-        vault_id
-    )
-    .fetch_optional(&state.pool)
-    .await?
-    .ok_or(VaultError::NotFound)?;
+    let row = sqlx::query!(r#"SELECT owner_wallet FROM vaults WHERE id = $1"#, vault_id)
+        .fetch_optional(&state.pool)
+        .await?
+        .ok_or(VaultError::NotFound)?;
 
     if row.owner_wallet.to_lowercase() != caller.to_lowercase() {
         return Err(VaultError::Forbidden("Owner only".to_string()));
@@ -572,13 +583,10 @@ pub async fn revoke_permission(
     let caller = wallet.0.clone();
 
     // Verify owner
-    let row = sqlx::query!(
-        r#"SELECT owner_wallet FROM vaults WHERE id = $1"#,
-        vault_id
-    )
-    .fetch_optional(&state.pool)
-    .await?
-    .ok_or(VaultError::NotFound)?;
+    let row = sqlx::query!(r#"SELECT owner_wallet FROM vaults WHERE id = $1"#, vault_id)
+        .fetch_optional(&state.pool)
+        .await?
+        .ok_or(VaultError::NotFound)?;
 
     if row.owner_wallet.to_lowercase() != caller.to_lowercase() {
         return Err(VaultError::Forbidden("Owner only".to_string()));
