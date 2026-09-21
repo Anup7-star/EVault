@@ -1,8 +1,7 @@
 use axum::{
     async_trait,
     extract::{FromRequestParts, Query, State},
-    http::{request::Parts, StatusCode},
-    response::{IntoResponse, Response},
+    http::request::Parts,
     routing::{get, post},
     Json, Router,
 };
@@ -150,16 +149,32 @@ pub fn router(pool: PgPool, session_secret: String) -> Router {
         .with_state(state)
 }
 
+// ── Extractor trait & impls ──────────────────────────────────────────────────
+
+/// Any axum state that can supply a pool + session_secret for JWT verification.
+pub trait HasAuthState: Send + Sync {
+    fn pool(&self) -> &PgPool;
+    fn session_secret(&self) -> &str;
+}
+
+impl HasAuthState for AuthState {
+    fn pool(&self) -> &PgPool { &self.pool }
+    fn session_secret(&self) -> &str { &self.session_secret }
+}
+
 // Extractor middleware for protected routes
 pub struct AuthenticatedWallet(pub String);
 
 #[async_trait]
-impl FromRequestParts<Arc<AuthState>> for AuthenticatedWallet {
+impl<S> FromRequestParts<Arc<S>> for AuthenticatedWallet
+where
+    S: HasAuthState + 'static,
+{
     type Rejection = AuthError;
 
     async fn from_request_parts(
         parts: &mut Parts,
-        state: &Arc<AuthState>,
+        state: &Arc<S>,
     ) -> Result<Self, Self::Rejection> {
         let auth_header = parts
             .headers
@@ -168,7 +183,7 @@ impl FromRequestParts<Arc<AuthState>> for AuthenticatedWallet {
             .and_then(|s| s.strip_prefix("Bearer "))
             .ok_or(AuthError::InvalidToken)?;
 
-        let wallet_address = verify_session(&state.pool, auth_header, &state.session_secret).await?;
+        let wallet_address = verify_session(state.pool(), auth_header, state.session_secret()).await?;
         Ok(AuthenticatedWallet(wallet_address))
     }
 }

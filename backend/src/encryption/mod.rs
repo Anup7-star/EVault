@@ -1,6 +1,6 @@
 use aes_gcm::{
     aead::{Aead, KeyInit},
-    Aes256Gcm, Nonce,
+    Aes256Gcm,
 };
 use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
@@ -40,7 +40,7 @@ pub fn encrypt(plaintext: &[u8], key: &[u8; 32]) -> EncryptedPayload {
 
     let mut nonce_bytes = [0u8; 12];
     OsRng.fill_bytes(&mut nonce_bytes);
-    let nonce = Nonce::from_slice(&nonce_bytes); // 96-bits
+    let nonce = (&nonce_bytes).into(); // 96-bits
 
     // AES-GCM encryption
     let mut ciphertext_with_tag = cipher
@@ -58,7 +58,7 @@ pub fn encrypt(plaintext: &[u8], key: &[u8; 32]) -> EncryptedPayload {
 
 pub fn decrypt(payload: &EncryptedPayload, key: &[u8; 32]) -> Result<Vec<u8>, EncryptionError> {
     let cipher = Aes256Gcm::new(key.into());
-    let nonce = Nonce::from_slice(&payload.iv);
+    let nonce = (&payload.iv).into();
 
     let mut ciphertext_with_tag = payload.ciphertext.clone();
     ciphertext_with_tag.extend_from_slice(&payload.auth_tag);

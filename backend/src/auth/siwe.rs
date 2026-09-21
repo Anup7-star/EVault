@@ -39,7 +39,7 @@ pub async fn verify_siwe(
         .try_into()
         .map_err(|_| AuthError::InvalidSignature("Invalid signature length".into()))?;
 
-    let verified = msg.verify_eip191(sig_array)
+    let _verified = msg.verify_eip191(sig_array)
         .map_err(|_| AuthError::InvalidSignature("Signature verification failed".into()))?;
 
     // The siwe crate returns the recovered bytes on success or we can just get from msg.address

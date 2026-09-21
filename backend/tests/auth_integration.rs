@@ -3,7 +3,6 @@ use ethers::signers::{LocalWallet, Signer};
 use reqwest::Client;
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
-use std::net::SocketAddr;
 use time::OffsetDateTime;
 use tokio::net::TcpListener;
 

@@ -1,6 +1,5 @@
 use ethers::prelude::*;
 use evault_backend::blockchain::contract_client::{AuthzResult, ContractClient, VaultAccessRegistry};
-use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
@@ -64,7 +63,7 @@ async fn test_blockchain_contract_interaction() {
     let contract = VaultAccessRegistry::new(contract_address, signer.clone());
 
     // 1. Create a vault
-    let receipt = contract.create_vault("TestResource".into())
+    let _receipt = contract.create_vault("TestResource".into())
         .send()
         .await
         .expect("Failed to send createVault tx")

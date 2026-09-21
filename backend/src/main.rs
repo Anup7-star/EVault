@@ -9,10 +9,9 @@
 use axum::{routing::get, Router};
 use sqlx::postgres::PgPoolOptions;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use tracing::info;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
-
-use evault_backend::*;
 
 // ── Health-check ─────────────────────────────────────────────────────────────
 
@@ -52,6 +51,9 @@ async fn main() -> anyhow::Result<()> {
     let contract_address = std::env::var("CONTRACT_ADDRESS")
         .expect("CONTRACT_ADDRESS must be set");
 
+    let session_secret = std::env::var("SESSION_SECRET")
+        .expect("SESSION_SECRET must be set");
+
     // 4. Postgres connection pool
     info!("Connecting to Postgres…");
     let pool = PgPoolOptions::new()
@@ -68,21 +70,28 @@ async fn main() -> anyhow::Result<()> {
         .expect("Failed to apply migrations");
     info!("Migrations applied successfully");
 
+    // 6. Validate encryption key at startup — panics with clear message if wrong
+    let _ = evault_backend::encryption::load_encryption_key();
+
+    // 7. Blockchain contract client
     info!("Initializing blockchain contract client...");
     let contract_client = evault_backend::blockchain::contract_client::ContractClient::new(&rpc_url, &contract_address)
         .expect("Failed to initialize contract client");
-    let shared_contract_client = std::sync::Arc::new(contract_client);
+    let shared_contract_client = Arc::new(contract_client);
 
-    // 6. Build router
+    // 8. Build router with middleware stack
+    // Order: Request ID -> Logging -> Router (which does auth -> handler)
     let app = Router::new()
-        // Health-check — simplest possible, no DB dependency
         .route("/health", get(health))
-        .with_state(shared_contract_client);
-    // Future: .merge(api::auth::router(pool.clone()))
-    //         .merge(api::vaults::router(pool.clone()))
-    //         .merge(api::permissions::router(pool.clone()))
+        .merge(evault_backend::api::auth::router(pool.clone(), session_secret.clone()))
+        .merge(evault_backend::api::vaults::router(pool.clone(), shared_contract_client, session_secret))
+        .layer(tower_http::trace::TraceLayer::new_for_http())
+        .layer(tower_http::request_id::SetRequestIdLayer::x_request_id(
+            tower_http::request_id::MakeRequestUuid,
+        ))
+        .layer(tower_http::cors::CorsLayer::permissive());
 
-    // 7. Start server
+    // 9. Start server
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     info!(address = %addr, "Listening");
 
