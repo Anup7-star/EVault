@@ -1,41 +1,64 @@
-//! Vault repository — raw SQL queries against `vaults`, `permissions`,
-//! and `encrypted_secrets` tables.
+use crate::encryption::EncryptedPayload;
+use sqlx::PgPool;
+use uuid::Uuid;
 
-// TODO: insert_vault(tx, NewVault) -> Vault
-// TODO: find_vault_by_id(pool, uuid) -> Option<Vault>
-// TODO: find_vault_by_blockchain_id(pool, bigint) -> Option<Vault>
-// TODO: list_vaults_by_owner(pool, wallet) -> Vec<Vault>
-// TODO: update_vault_status(pool, uuid, status) -> ()
-// TODO: insert_permission(pool, NewPermission) -> Permission
-// TODO: find_permission(pool, vault_id, wallet) -> Option<Permission>
-// TODO: revoke_permission(pool, vault_id, wallet) -> ()
-// TODO: insert_encrypted_secret(pool, NewSecret) -> EncryptedSecret
-// TODO: find_secret_by_vault(pool, vault_id) -> Option<EncryptedSecret>
+pub async fn store_secret(
+    pool: &PgPool,
+    vault_id: Uuid,
+    payload: EncryptedPayload,
+) -> sqlx::Result<()> {
+    // We expect IV to be 12 bytes exactly.
+    sqlx::query!(
+        r#"
+        INSERT INTO encrypted_secrets (vault_id, ciphertext, iv, auth_tag, updated_at)
+        VALUES ($1, $2, $3, $4, NOW())
+        ON CONFLICT (vault_id) DO UPDATE
+        SET ciphertext = EXCLUDED.ciphertext,
+            iv = EXCLUDED.iv,
+            auth_tag = EXCLUDED.auth_tag,
+            updated_at = NOW()
+        "#,
+        vault_id,
+        payload.ciphertext,
+        &payload.iv[..],
+        payload.auth_tag,
+    )
+    .execute(pool)
+    .await?;
 
-pub async fn insert_vault() {
-    // TODO
+    Ok(())
 }
 
-pub async fn find_vault_by_id() {
-    // TODO
-}
+pub async fn get_secret(
+    pool: &PgPool,
+    vault_id: Uuid,
+) -> sqlx::Result<Option<EncryptedPayload>> {
+    let row = sqlx::query!(
+        r#"
+        SELECT ciphertext, iv, auth_tag
+        FROM encrypted_secrets
+        WHERE vault_id = $1
+        "#,
+        vault_id
+    )
+    .fetch_optional(pool)
+    .await?;
 
-pub async fn insert_permission() {
-    // TODO
-}
+    if let Some(record) = row {
+        let mut iv = [0u8; 12];
+        if record.iv.len() == 12 {
+            iv.copy_from_slice(&record.iv);
+        } else {
+            // Technically a corruption/schema mismatch, but sqlx guarantees bytea as Vec<u8>
+            return Ok(None); 
+        }
 
-pub async fn find_permission() {
-    // TODO
-}
-
-pub async fn revoke_permission() {
-    // TODO
-}
-
-pub async fn insert_encrypted_secret() {
-    // TODO
-}
-
-pub async fn find_secret_by_vault() {
-    // TODO
+        Ok(Some(EncryptedPayload {
+            ciphertext: record.ciphertext,
+            iv,
+            auth_tag: record.auth_tag.expect("auth_tag is NOT NULL in DB"),
+        }))
+    } else {
+        Ok(None)
+    }
 }
