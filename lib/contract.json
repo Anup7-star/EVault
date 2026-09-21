@@ -19,8 +19,14 @@
         {
           "indexed": false,
           "internalType": "uint256",
-          "name": "expiryTimestamp",
+          "name": "expiresAt",
           "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint8",
+          "name": "role",
+          "type": "uint8"
         }
       ],
       "name": "AccessGranted",
@@ -63,11 +69,11 @@
         {
           "indexed": false,
           "internalType": "string",
-          "name": "name",
+          "name": "resourceReference",
           "type": "string"
         }
       ],
-      "name": "VaultRegistered",
+      "name": "VaultCreated",
       "type": "event"
     },
     {
@@ -92,8 +98,13 @@
         },
         {
           "internalType": "uint256",
-          "name": "expiryTimestamp",
+          "name": "expiresAt",
           "type": "uint256"
+        },
+        {
+          "internalType": "uint8",
+          "name": "role",
+          "type": "uint8"
         }
       ],
       "stateMutability": "view",
@@ -126,6 +137,25 @@
     {
       "inputs": [
         {
+          "internalType": "string",
+          "name": "resourceReference",
+          "type": "string"
+        }
+      ],
+      "name": "createVault",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "vaultId",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
           "internalType": "uint256",
           "name": "vaultId",
           "type": "uint256"
@@ -148,6 +178,40 @@
           "internalType": "uint256",
           "name": "vaultId",
           "type": "uint256"
+        },
+        {
+          "internalType": "address",
+          "name": "wallet",
+          "type": "address"
+        }
+      ],
+      "name": "getPermission",
+      "outputs": [
+        {
+          "internalType": "bool",
+          "name": "active",
+          "type": "bool"
+        },
+        {
+          "internalType": "uint256",
+          "name": "expiresAt",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint8",
+          "name": "role",
+          "type": "uint8"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "vaultId",
+          "type": "uint256"
         }
       ],
       "name": "getVault",
@@ -159,7 +223,7 @@
         },
         {
           "internalType": "string",
-          "name": "name",
+          "name": "resourceReference",
           "type": "string"
         }
       ],
@@ -192,14 +256,43 @@
           "type": "address"
         },
         {
+          "internalType": "uint8",
+          "name": "role",
+          "type": "uint8"
+        },
+        {
           "internalType": "uint256",
-          "name": "expiryTimestamp",
+          "name": "expiresAt",
           "type": "uint256"
         }
       ],
       "name": "grantAccess",
       "outputs": [],
       "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "vaultId",
+          "type": "uint256"
+        },
+        {
+          "internalType": "address",
+          "name": "wallet",
+          "type": "address"
+        }
+      ],
+      "name": "hasAccess",
+      "outputs": [
+        {
+          "internalType": "bool",
+          "name": "",
+          "type": "bool"
+        }
+      ],
+      "stateMutability": "view",
       "type": "function"
     },
     {
@@ -213,25 +306,6 @@
         }
       ],
       "stateMutability": "view",
-      "type": "function"
-    },
-    {
-      "inputs": [
-        {
-          "internalType": "string",
-          "name": "name",
-          "type": "string"
-        }
-      ],
-      "name": "registerVault",
-      "outputs": [
-        {
-          "internalType": "uint256",
-          "name": "",
-          "type": "uint256"
-        }
-      ],
-      "stateMutability": "nonpayable",
       "type": "function"
     },
     {
@@ -274,7 +348,7 @@
         },
         {
           "internalType": "string",
-          "name": "name",
+          "name": "resourceReference",
           "type": "string"
         },
         {
