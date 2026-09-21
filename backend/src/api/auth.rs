@@ -43,10 +43,10 @@ pub async fn get_nonce(
     let nonce = generate_nonce();
     let ttl_seconds = 300; // 5 minutes
 
-    store_nonce(&state.pool, &query.address, &nonce, ttl_seconds).await?;
+    let normalized_address = query.address.to_lowercase();
+    store_nonce(&state.pool, &normalized_address, &nonce, ttl_seconds).await?;
 
-    let expires_at = (chrono::Utc::now() + chrono::Duration::seconds(ttl_seconds))
-        .to_rfc3339();
+    let expires_at = (chrono::Utc::now() + chrono::Duration::seconds(ttl_seconds)).to_rfc3339();
 
     Ok(Json(NonceResponse { nonce, expires_at }))
 }
@@ -69,9 +69,9 @@ pub async fn verify_signature(
     State(state): State<Arc<AuthState>>,
     Json(payload): Json<VerifyRequest>,
 ) -> Result<Json<VerifyResponse>, AuthError> {
-    // We expect the domain and chain_id to be verified, in production these might come from config
-    let expected_domain = "localhost";
-    let expected_chain_id = 1;
+    // TODO: Move to env/config for non-local deployment
+    let expected_domain = "localhost:3000";
+    let expected_chain_id = 31337;
 
     let verify_result = verify_siwe(
         &state.pool,
@@ -158,8 +158,12 @@ pub trait HasAuthState: Send + Sync {
 }
 
 impl HasAuthState for AuthState {
-    fn pool(&self) -> &PgPool { &self.pool }
-    fn session_secret(&self) -> &str { &self.session_secret }
+    fn pool(&self) -> &PgPool {
+        &self.pool
+    }
+    fn session_secret(&self) -> &str {
+        &self.session_secret
+    }
 }
 
 // Extractor middleware for protected routes
@@ -183,7 +187,8 @@ where
             .and_then(|s| s.strip_prefix("Bearer "))
             .ok_or(AuthError::InvalidToken)?;
 
-        let wallet_address = verify_session(state.pool(), auth_header, state.session_secret()).await?;
+        let wallet_address =
+            verify_session(state.pool(), auth_header, state.session_secret()).await?;
         Ok(AuthenticatedWallet(wallet_address))
     }
 }

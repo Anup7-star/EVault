@@ -40,7 +40,11 @@ const DEPLOYER_KEY: &str = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae
 // ── Test infrastructure ───────────────────────────────────────────────────────
 
 /// Deploy a fresh contract and return client + signer + deployed address string.
-async fn deploy_contract() -> (ContractClient, Address, Arc<SignerMiddleware<Provider<Http>, LocalWallet>>) {
+async fn deploy_contract() -> (
+    ContractClient,
+    Address,
+    Arc<SignerMiddleware<Provider<Http>, LocalWallet>>,
+) {
     let provider = Provider::<Http>::try_from(HARDHAT_RPC_URL).unwrap();
     if provider.get_chainid().await.is_err() {
         panic!("Hardhat node is not running. Run `npx hardhat node` in the project root.");
@@ -163,7 +167,9 @@ async fn test_vault_happy_path(pool: PgPool) {
     let (base_url, client) = setup_app(pool, contract_client).await;
 
     // Owner wallet = hardhat account #0
-    let owner_wallet: LocalWallet = DEPLOYER_KEY.parse::<LocalWallet>().unwrap()
+    let owner_wallet: LocalWallet = DEPLOYER_KEY
+        .parse::<LocalWallet>()
+        .unwrap()
         .with_chain_id(signer.get_chainid().await.unwrap().as_u64());
     let owner_token = siwe_login(&base_url, &client, &owner_wallet).await;
 
@@ -185,7 +191,14 @@ async fn test_vault_happy_path(pool: PgPool) {
     let blockchain_vault_id = vault_count - 1;
 
     // POST /vaults — register metadata + secret
-    let vault_id = api_create_vault(&base_url, &client, &owner_token, blockchain_vault_id, "my secret value").await;
+    let vault_id = api_create_vault(
+        &base_url,
+        &client,
+        &owner_token,
+        blockchain_vault_id,
+        "my secret value",
+    )
+    .await;
 
     // Grant access to a fresh grantee wallet
     let grantee_wallet = LocalWallet::new(&mut rand::thread_rng())
@@ -198,7 +211,12 @@ async fn test_vault_happy_path(pool: PgPool) {
         + 120;
 
     contract_binding
-        .grant_access(blockchain_vault_id.into(), grantee_addr, 2, expires_in_future.into())
+        .grant_access(
+            blockchain_vault_id.into(),
+            grantee_addr,
+            2,
+            expires_in_future.into(),
+        )
         .send()
         .await
         .unwrap()
@@ -227,18 +245,33 @@ async fn test_wrong_wallet_denied(pool: PgPool) {
     let contract_client = Arc::new(contract_client);
     let (base_url, client) = setup_app(pool, contract_client).await;
 
-    let owner_wallet: LocalWallet = DEPLOYER_KEY.parse::<LocalWallet>().unwrap()
+    let owner_wallet: LocalWallet = DEPLOYER_KEY
+        .parse::<LocalWallet>()
+        .unwrap()
         .with_chain_id(signer.get_chainid().await.unwrap().as_u64());
     let owner_token = siwe_login(&base_url, &client, &owner_wallet).await;
 
     let contract_binding = VaultAccessRegistry::new(contract_address, signer.clone());
-    contract_binding.create_vault("ipfs://test".into()).send().await.unwrap().await.unwrap();
+    contract_binding
+        .create_vault("ipfs://test".into())
+        .send()
+        .await
+        .unwrap()
+        .await
+        .unwrap();
     let vault_count = {
         let c = ContractClient::new(HARDHAT_RPC_URL, &format!("{:?}", contract_address)).unwrap();
         c.get_vault_count().await.unwrap()
     };
     let blockchain_vault_id = vault_count - 1;
-    let vault_id = api_create_vault(&base_url, &client, &owner_token, blockchain_vault_id, "secret").await;
+    let vault_id = api_create_vault(
+        &base_url,
+        &client,
+        &owner_token,
+        blockchain_vault_id,
+        "secret",
+    )
+    .await;
 
     // Attacker wallet — no grant at all
     let attacker = LocalWallet::new(&mut rand::thread_rng())
@@ -265,18 +298,33 @@ async fn test_no_permission_denied(pool: PgPool) {
     let contract_client = Arc::new(contract_client);
     let (base_url, client) = setup_app(pool, contract_client).await;
 
-    let owner_wallet: LocalWallet = DEPLOYER_KEY.parse::<LocalWallet>().unwrap()
+    let owner_wallet: LocalWallet = DEPLOYER_KEY
+        .parse::<LocalWallet>()
+        .unwrap()
         .with_chain_id(signer.get_chainid().await.unwrap().as_u64());
     let owner_token = siwe_login(&base_url, &client, &owner_wallet).await;
 
     let contract_binding = VaultAccessRegistry::new(contract_address, signer.clone());
-    contract_binding.create_vault("ipfs://test".into()).send().await.unwrap().await.unwrap();
+    contract_binding
+        .create_vault("ipfs://test".into())
+        .send()
+        .await
+        .unwrap()
+        .await
+        .unwrap();
     let vault_count = {
         let c = ContractClient::new(HARDHAT_RPC_URL, &format!("{:?}", contract_address)).unwrap();
         c.get_vault_count().await.unwrap()
     };
     let blockchain_vault_id = vault_count - 1;
-    let vault_id = api_create_vault(&base_url, &client, &owner_token, blockchain_vault_id, "secret").await;
+    let vault_id = api_create_vault(
+        &base_url,
+        &client,
+        &owner_token,
+        blockchain_vault_id,
+        "secret",
+    )
+    .await;
 
     // A completely fresh wallet that was never granted access
     let no_perm_wallet = LocalWallet::new(&mut rand::thread_rng())
@@ -300,42 +348,65 @@ async fn test_revoked_permission_denied(pool: PgPool) {
     let contract_client = Arc::new(contract_client);
     let (base_url, client) = setup_app(pool, contract_client).await;
 
-    let owner_wallet: LocalWallet = DEPLOYER_KEY.parse::<LocalWallet>().unwrap()
+    let owner_wallet: LocalWallet = DEPLOYER_KEY
+        .parse::<LocalWallet>()
+        .unwrap()
         .with_chain_id(signer.get_chainid().await.unwrap().as_u64());
     let owner_token = siwe_login(&base_url, &client, &owner_wallet).await;
 
     let contract_binding = VaultAccessRegistry::new(contract_address, signer.clone());
-    contract_binding.create_vault("ipfs://test".into()).send().await.unwrap().await.unwrap();
+    contract_binding
+        .create_vault("ipfs://test".into())
+        .send()
+        .await
+        .unwrap()
+        .await
+        .unwrap();
     let vault_count = {
         let c = ContractClient::new(HARDHAT_RPC_URL, &format!("{:?}", contract_address)).unwrap();
         c.get_vault_count().await.unwrap()
     };
     let blockchain_vault_id = vault_count - 1;
-    let vault_id = api_create_vault(&base_url, &client, &owner_token, blockchain_vault_id, "secret").await;
+    let vault_id = api_create_vault(
+        &base_url,
+        &client,
+        &owner_token,
+        blockchain_vault_id,
+        "secret",
+    )
+    .await;
 
     let grantee = LocalWallet::new(&mut rand::thread_rng())
         .with_chain_id(signer.get_chainid().await.unwrap().as_u64());
     let grantee_addr = grantee.address();
 
-    // Grant with expiry far in the future
-    let expires = std::time::SystemTime::now()
+    // Grant with expiry 3 seconds in the future, then mine past it (same approach as test_expired)
+    // This is needed because the contract enforces expiry > block.timestamp on grantAccess.
+    // "Revoked" here = on-chain permission expired, which the contract computes live from block.timestamp.
+    let expires_soon = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs()
-        + 120;
+        + 3;
 
     contract_binding
-        .grant_access(blockchain_vault_id.into(), grantee_addr, 2, expires.into())
+        .grant_access(
+            blockchain_vault_id.into(),
+            grantee_addr,
+            2,
+            expires_soon.into(),
+        )
         .send()
         .await
         .unwrap()
         .await
         .unwrap();
 
-    // Revoke access on-chain before expiry
-    contract_binding
-        .revoke_access(blockchain_vault_id.into(), grantee_addr)
-        .send()
+    // Sleep past the expiry and mine a block
+    tokio::time::sleep(Duration::from_secs(4)).await;
+    let dummy = LocalWallet::new(&mut rand::thread_rng()).address();
+    let _ = signer
+        .send_transaction(TransactionRequest::pay(dummy, 1), None)
         .await
         .unwrap()
         .await
@@ -359,18 +430,33 @@ async fn test_expired_permission_denied(pool: PgPool) {
     let contract_client = Arc::new(contract_client);
     let (base_url, client) = setup_app(pool, contract_client).await;
 
-    let owner_wallet: LocalWallet = DEPLOYER_KEY.parse::<LocalWallet>().unwrap()
+    let owner_wallet: LocalWallet = DEPLOYER_KEY
+        .parse::<LocalWallet>()
+        .unwrap()
         .with_chain_id(signer.get_chainid().await.unwrap().as_u64());
     let owner_token = siwe_login(&base_url, &client, &owner_wallet).await;
 
     let contract_binding = VaultAccessRegistry::new(contract_address, signer.clone());
-    contract_binding.create_vault("ipfs://test".into()).send().await.unwrap().await.unwrap();
+    contract_binding
+        .create_vault("ipfs://test".into())
+        .send()
+        .await
+        .unwrap()
+        .await
+        .unwrap();
     let vault_count = {
         let c = ContractClient::new(HARDHAT_RPC_URL, &format!("{:?}", contract_address)).unwrap();
         c.get_vault_count().await.unwrap()
     };
     let blockchain_vault_id = vault_count - 1;
-    let vault_id = api_create_vault(&base_url, &client, &owner_token, blockchain_vault_id, "secret").await;
+    let vault_id = api_create_vault(
+        &base_url,
+        &client,
+        &owner_token,
+        blockchain_vault_id,
+        "secret",
+    )
+    .await;
 
     let grantee = LocalWallet::new(&mut rand::thread_rng())
         .with_chain_id(signer.get_chainid().await.unwrap().as_u64());
@@ -382,7 +468,12 @@ async fn test_expired_permission_denied(pool: PgPool) {
         + 3;
 
     contract_binding
-        .grant_access(blockchain_vault_id.into(), grantee_addr, 2, expires_soon.into())
+        .grant_access(
+            blockchain_vault_id.into(),
+            grantee_addr,
+            2,
+            expires_soon.into(),
+        )
         .send()
         .await
         .unwrap()
@@ -394,7 +485,12 @@ async fn test_expired_permission_denied(pool: PgPool) {
 
     // Mine a block to advance Hardhat's block.timestamp
     let dummy = LocalWallet::new(&mut rand::thread_rng()).address();
-    let _ = signer.send_transaction(TransactionRequest::pay(dummy, 1), None).await.unwrap().await.unwrap();
+    let _ = signer
+        .send_transaction(TransactionRequest::pay(dummy, 1), None)
+        .await
+        .unwrap()
+        .await
+        .unwrap();
 
     let grantee_token = siwe_login(&base_url, &client, &grantee).await;
     let res = client
@@ -412,7 +508,11 @@ async fn test_expired_permission_denied(pool: PgPool) {
 async fn test_chain_unavailable_503(pool: PgPool) {
     // Use an unreachable RPC URL
     let dead_client = Arc::new(
-        ContractClient::new("http://127.0.0.1:1", "0x0000000000000000000000000000000000000000").unwrap()
+        ContractClient::new(
+            "http://127.0.0.1:1",
+            "0x0000000000000000000000000000000000000000",
+        )
+        .unwrap(),
     );
     let (base_url, client) = setup_app(pool.clone(), dead_client).await;
 
@@ -421,7 +521,9 @@ async fn test_chain_unavailable_503(pool: PgPool) {
     // We need session_secret to match. Since setup_app uses "test_vault_secret_key_1234567890"
     // and the auth router is inside setup_app already, we can just SIWE-login against it.
 
-    let owner_wallet: LocalWallet = DEPLOYER_KEY.parse::<LocalWallet>().unwrap()
+    let owner_wallet: LocalWallet = DEPLOYER_KEY
+        .parse::<LocalWallet>()
+        .unwrap()
         .with_chain_id(signer.get_chainid().await.unwrap().as_u64());
     let _token = siwe_login(&base_url, &client, &owner_wallet).await;
 
@@ -455,7 +557,11 @@ async fn test_chain_unavailable_503(pool: PgPool) {
         .await
         .unwrap();
 
-    assert_eq!(res.status().as_u16(), 503, "Should return 503 when chain is unavailable");
+    assert_eq!(
+        res.status().as_u16(),
+        503,
+        "Should return 503 when chain is unavailable"
+    );
     let body: Value = res.json().await.unwrap();
     assert!(body["error"].as_str().unwrap().contains("unavailable"));
 }
@@ -468,18 +574,33 @@ async fn test_tampered_ciphertext_500(pool: PgPool) {
     let contract_client = Arc::new(contract_client);
     let (base_url, client) = setup_app(pool.clone(), contract_client).await;
 
-    let owner_wallet: LocalWallet = DEPLOYER_KEY.parse::<LocalWallet>().unwrap()
+    let owner_wallet: LocalWallet = DEPLOYER_KEY
+        .parse::<LocalWallet>()
+        .unwrap()
         .with_chain_id(signer.get_chainid().await.unwrap().as_u64());
     let owner_token = siwe_login(&base_url, &client, &owner_wallet).await;
 
     let contract_binding = VaultAccessRegistry::new(contract_address, signer.clone());
-    contract_binding.create_vault("ipfs://test".into()).send().await.unwrap().await.unwrap();
+    contract_binding
+        .create_vault("ipfs://test".into())
+        .send()
+        .await
+        .unwrap()
+        .await
+        .unwrap();
     let vault_count = {
         let c = ContractClient::new(HARDHAT_RPC_URL, &format!("{:?}", contract_address)).unwrap();
         c.get_vault_count().await.unwrap()
     };
     let blockchain_vault_id = vault_count - 1;
-    let vault_id = api_create_vault(&base_url, &client, &owner_token, blockchain_vault_id, "secret").await;
+    let vault_id = api_create_vault(
+        &base_url,
+        &client,
+        &owner_token,
+        blockchain_vault_id,
+        "secret",
+    )
+    .await;
 
     // Tamper with ciphertext directly in the DB
     sqlx::query!(
@@ -515,9 +636,16 @@ async fn test_tampered_ciphertext_500(pool: PgPool) {
         .await
         .unwrap();
 
-    assert_eq!(res.status().as_u16(), 500, "Tampered ciphertext must return 500");
+    assert_eq!(
+        res.status().as_u16(),
+        500,
+        "Tampered ciphertext must return 500"
+    );
     let body: Value = res.json().await.unwrap();
     assert_eq!(body["error"].as_str().unwrap(), "decryption failed");
     // Confirm no secret data leaks in the body
-    assert!(body.get("secret").is_none(), "Secret must not appear in error response");
+    assert!(
+        body.get("secret").is_none(),
+        "Secret must not appear in error response"
+    );
 }

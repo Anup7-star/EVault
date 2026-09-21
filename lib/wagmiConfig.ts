@@ -1,6 +1,6 @@
-import { http, createConfig } from "wagmi";
+import { http } from "wagmi";
 import { defineChain } from "viem";
-import { injected } from "@wagmi/core";
+import { getDefaultConfig } from "@rainbow-me/rainbowkit";
 
 // Local Hardhat network — used for the demo (no testnet ETH needed)
 export const hardhatLocal = defineChain({
@@ -19,11 +19,10 @@ export const arbitrumSepolia = defineChain({
   blockExplorers: { default: { name: "Arbiscan", url: "https://sepolia.arbiscan.io" } },
 });
 
-export const wagmiConfig = createConfig({
+export const wagmiConfig = getDefaultConfig({
+  appName: "EVault Web3",
+  projectId: process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || "YOUR_PROJECT_ID",
   chains: [hardhatLocal, arbitrumSepolia],
-  connectors: [
-    injected(),
-  ],
   transports: {
     [hardhatLocal.id]: http(),
     [arbitrumSepolia.id]: http(),

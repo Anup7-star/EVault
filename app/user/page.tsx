@@ -1,59 +1,96 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useAccount, useSignMessage } from "wagmi";
+import { useAccount, useSignMessage, useChainId } from "wagmi";
+import { SiweMessage } from "siwe";
 import ConnectWallet from "@/components/ConnectWallet";
-import { buildSiweMessage } from "@/lib/siwe";
+import { useSession } from "@/components/SessionContext";
+import { apiClient } from "@/lib/apiClient";
+
+// Deferred: Standalone error pages, responsive polish.
 
 export default function UserDashboard() {
   const { address, isConnected } = useAccount();
+  const chainId = useChainId();
   const { signMessageAsync } = useSignMessage();
+  const { token, setSession, clearSession } = useSession();
 
-  const [vaultId, setVaultId] = useState("");
-  const [status, setStatus] = useState("");
-  const [secret, setSecret] = useState<string | null>(null);
+  const [authStatus, setAuthStatus] = useState("");
+  const [vaults, setVaults] = useState<any[]>([]);
+  const [vaultSecrets, setVaultSecrets] = useState<Record<string, string>>({});
+  const [vaultErrors, setVaultErrors] = useState<Record<string, string>>({});
 
-  async function handleRequestAccess(e: React.FormEvent) {
-    e.preventDefault();
+  // Trigger SIWE on mount/connect if not authenticated
+  useEffect(() => {
+    if (isConnected && address && !token) {
+      handleSignIn();
+    }
+    if (!isConnected) {
+      clearSession();
+      setAuthStatus("");
+    }
+  }, [isConnected, address, token]);
+
+  // Fetch vaults when authenticated
+  useEffect(() => {
+    if (token) {
+      apiClient.listVaults(token)
+        .then(setVaults)
+        .catch((err) => console.error("Failed to list vaults:", err));
+    } else {
+      setVaults([]);
+    }
+  }, [token]);
+
+  async function handleSignIn() {
     if (!address) return;
-    setSecret(null);
-    setStatus("Generating secure sign-in request...");
+    setAuthStatus("Fetching secure nonce...");
     try {
-      const nonceRes = await fetch(`/api/siwe/nonce?address=${address}`);
-      const { nonce } = await nonceRes.json();
+      const { nonce } = await apiClient.getNonce(address);
 
-      const message = buildSiweMessage({
-        domain: typeof window !== "undefined" ? window.location.host : "localhost",
+      setAuthStatus("Please sign the message in your wallet...");
+      const message = new SiweMessage({
+        domain: window.location.host,
         address,
+        statement: "Sign in to EVault",
+        uri: window.location.origin,
+        version: "1",
+        chainId,
         nonce,
-        statement: `Request access to Vault #${vaultId}. No password needed — this signature proves wallet ownership without gas fees.`,
       });
 
-      setStatus("Please approve the signature request in your wallet. (No gas fees required)");
-      const signature = await signMessageAsync({ message });
-
-      setStatus("Signature approved! Verifying your access permissions on the blockchain...");
-      const res = await fetch("/api/vault/access", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ vaultId, address, message, signature }),
+      const signature = await signMessageAsync({
+        message: message.prepareMessage(),
       });
-      const data = await res.json();
 
-      if (!res.ok) {
-        setStatus(data.error || "Access denied. Your permission for this vault may have expired or hasn't been granted yet.");
-        return;
-      }
-
-      setSecret(data.secret);
-      setStatus("✓ Access confirmed! Your decrypted secret is ready below.");
+      setAuthStatus("Verifying signature...");
+      const verifyRes = await apiClient.verifySiwe(message.prepareMessage(), signature);
+      
+      setSession(verifyRes.token, verifyRes.walletAddress);
+      setAuthStatus("");
     } catch (err: any) {
-      if (err.message?.includes("User rejected") || err.shortMessage?.includes("User rejected")) {
-        setStatus("Signature request was declined in your wallet. Feel free to try again whenever you're ready.");
-      } else {
-        setStatus(`Could not unlock vault: ${err.shortMessage || err.message || "Please check your wallet connection."}`);
-      }
+      setAuthStatus(`Sign-in failed: ${err.message || "Unknown error"}`);
+    }
+  }
+
+  async function handleRevealSecret(vaultId: string) {
+    if (!token) return;
+    try {
+      const data = await apiClient.getSecret(token, vaultId);
+      setVaultSecrets(prev => ({ ...prev, [vaultId]: data.secret }));
+      setVaultErrors(prev => {
+        const newErrs = { ...prev };
+        delete newErrs[vaultId];
+        return newErrs;
+      });
+    } catch (err: any) {
+      setVaultErrors(prev => ({ ...prev, [vaultId]: err.message || "Access denied" }));
+      setVaultSecrets(prev => {
+        const newSecrets = { ...prev };
+        delete newSecrets[vaultId];
+        return newSecrets;
+      });
     }
   }
 
@@ -93,88 +130,75 @@ export default function UserDashboard() {
         </div>
       )}
 
-      {isConnected && (
+      {/* Authenticating State */}
+      {isConnected && !token && authStatus && (
+        <div className="rounded-2xl border border-amber-800/40 bg-amber-950/20 p-5 text-sm text-amber-200/90 text-center">
+          <p className="animate-pulse">{authStatus}</p>
+          {authStatus.includes("failed") && (
+            <button onClick={handleSignIn} className="mt-4 rounded-xl border border-amber-500/50 px-4 py-2 hover:bg-amber-500/20">
+              Retry Sign-In
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Authenticated State */}
+      {isConnected && token && (
         <div className="space-y-6">
-          {/* Reassurance Banner */}
           <div className="rounded-2xl border border-warm-border bg-warm-surface p-5 shadow-sm">
             <div className="flex items-start gap-3">
               <span className="text-xl">💡</span>
               <div className="text-xs text-warm-muted leading-relaxed">
-                <p className="font-bold text-warm-text mb-1">How wallet authentication works</p>
-                When you request a secret, your Web3 wallet will prompt you to <strong className="text-amber-300">sign a message</strong>. This is 100% free (no gas fees or token transfers) — it simply proves you own this wallet address so we can safely decrypt the vault for you.
+                <p className="font-bold text-warm-text mb-1">Authenticated</p>
+                You are securely signed in as <span className="font-mono text-amber-300">{address}</span>.
               </div>
             </div>
           </div>
 
-          {/* Request Form Section */}
-          <section className="rounded-2xl border border-warm-border bg-warm-surface p-6 shadow-md">
-            <div className="mb-5">
-              <h2 className="text-lg font-bold text-warm-text flex items-center gap-2">
-                <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-amber-500/10 text-amber-400 text-sm">
-                  🔑
-                </span>
-                Unlock Vault Content
-              </h2>
-              <p className="mt-1 text-xs text-warm-muted leading-relaxed">
-                Enter the Vault ID assigned to you by your admin to verify permissions and view the secret.
-              </p>
+          <h2 className="text-lg font-bold text-warm-text">Your Accessible Vaults</h2>
+          {vaults.length === 0 ? (
+            <p className="text-warm-muted text-sm italic">No vaults found.</p>
+          ) : (
+            <div className="grid gap-4">
+              {vaults.map((vault) => (
+                <div key={vault.id} className="rounded-2xl border border-warm-border bg-warm-surface p-5 shadow-sm">
+                  <div className="flex justify-between items-start mb-2">
+                    <h3 className="font-bold text-warm-text">{vault.name} <span className="text-warm-muted font-mono text-xs ml-2">#{vault.blockchainVaultId}</span></h3>
+                    <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${vault.status === 'ACTIVE' ? 'bg-emerald-950/50 text-emerald-400 border border-emerald-900' : 'bg-rose-950/50 text-rose-400 border border-rose-900'}`}>{vault.status}</span>
+                  </div>
+                  {vault.description && <p className="text-xs text-warm-muted mb-4">{vault.description}</p>}
+                  
+                  <div className="flex items-center gap-2 mb-4">
+                     <button
+                        onClick={() => handleRevealSecret(vault.id)}
+                        className="rounded-xl bg-warm-accent px-4 py-2 text-xs font-bold text-stone-950 hover:bg-amber-500 transition-all"
+                      >
+                        Reveal Secret
+                      </button>
+                  </div>
+
+                  {vaultErrors[vault.id] && (
+                     <div className="mt-3 rounded-xl p-3.5 text-xs bg-rose-950/30 border border-rose-800/40 text-rose-300 font-mono">
+                        Error: {vaultErrors[vault.id]}
+                     </div>
+                  )}
+
+                  {vaultSecrets[vault.id] && (
+                    <div className="mt-3 rounded-xl border border-emerald-800/40 bg-emerald-950/20 p-4 shadow-inner">
+                      <div className="flex items-center justify-between mb-2">
+                        <p className="text-xs font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
+                          <span>🔓</span> Decrypted Secret Content
+                        </p>
+                      </div>
+                      <div className="rounded-xl bg-warm-bg border border-warm-border p-3 font-mono text-sm text-warm-text select-all break-all shadow-sm">
+                        {vaultSecrets[vault.id]}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
             </div>
-
-            <form onSubmit={handleRequestAccess} className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-warm-text mb-1.5">
-                  Target Vault ID
-                </label>
-                <input
-                  className="w-full rounded-xl border border-warm-border bg-warm-card px-4 py-2.5 text-sm text-warm-text placeholder-warm-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60 font-mono"
-                  placeholder="Enter vault ID (e.g. 0)"
-                  value={vaultId}
-                  onChange={(e) => setVaultId(e.target.value)}
-                  required
-                />
-              </div>
-
-              <button
-                type="submit"
-                className="w-full rounded-xl bg-warm-accent px-4 py-3 text-xs font-bold text-stone-950 hover:bg-amber-500 active:scale-[0.99] transition-all shadow-md shadow-amber-950/20 focus-visible:outline-none"
-              >
-                Verify Wallet &amp; Unlock Secret
-              </button>
-            </form>
-
-            {/* Friendly Status Feedback */}
-            {status && (
-              <div
-                className={`mt-5 rounded-xl p-3.5 text-xs leading-relaxed border font-mono ${
-                  status.includes("Could not") || status.includes("denied") || status.includes("declined")
-                    ? "bg-rose-950/30 border-rose-800/40 text-rose-300"
-                    : status.includes("✓") || status.includes("ready")
-                    ? "bg-emerald-950/30 border-emerald-800/40 text-emerald-300"
-                    : "bg-warm-card border-warm-border text-amber-200/90"
-                }`}
-              >
-                {status}
-              </div>
-            )}
-
-            {/* Decrypted Secret Result Box */}
-            {secret && (
-              <div className="mt-6 rounded-2xl border border-emerald-800/40 bg-emerald-950/20 p-5 shadow-inner">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-xs font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
-                    <span>🔓</span> Decrypted Secret Content
-                  </p>
-                  <span className="text-[10px] text-emerald-400/80 font-mono">Verified On-Chain</span>
-                </div>
-                <div className="rounded-xl bg-warm-bg border border-warm-border p-4 font-mono text-sm text-warm-text select-all break-all shadow-sm">
-                  {secret}
-                </div>
-                <p className="mt-2 text-[11px] text-warm-muted font-sans text-right">
-                  Decrypted securely in your browser.
-                </p>
-              </div>
-            )}
-          </section>
+          )}
         </div>
       )}
     </main>
