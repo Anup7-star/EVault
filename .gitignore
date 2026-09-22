@@ -29,3 +29,5 @@ yarn-error.log*
 # local env files
 .env*.local
 .env
+
+evault_db_store.json
