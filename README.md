@@ -1,72 +1,95 @@
-# Decentralized Web-Vault & Enterprise Access Manager
+# EVault: Decentralized Web-Vault & Enterprise Access Manager
 
-Working demo covering Phases 1-4 from the plan of work. Runs entirely on your
-machine using a local Hardhat blockchain — no testnet ETH needed to demo it.
+EVault is a wallet-gated vault for sharing secrets with time-limited access. An admin creates a vault, the secret is encrypted before it is stored, and access is granted to a team member's wallet address with an expiry. The grant lives **on-chain**. Every time someone asks to reveal a secret, the backend verifies their signed-in wallet, re-reads the permission from the blockchain, and only then decrypts. If the grant is expired, revoked, or the chain is unreachable, the secret is not revealed.
 
-## Stack (and where it differs from the slide deck, for time)
-- Smart contract: Solidity — matches the plan exactly (Vault struct, grantAccess,
-  expiryTimestamp, onlyOwner-style modifier, checkAccess).
-- Frontend: Next.js (TypeScript) + Tailwind + wagmi/viem for wallet connect —
-  same as planned, using wagmi's built-in `injected` connector instead of
-  RainbowKit to avoid an extra setup step for the demo. Swappable later.
-- Auth: hand-rolled EIP-4361-style SIWE (server nonce + signed message +
-  `viem.verifyMessage`) — same guarantees as the `siwe` package.
-- Backend & decryption: Next.js API routes (TypeScript) instead of a separate
-  Rust service — same logic (verify signature → check on-chain access →
-  decrypt), just co-located for a simpler local demo.
-- Encrypted storage: AES-256-GCM, same as planned, backed by a JSON file
-  instead of PostgreSQL for zero setup. `lib/store.ts` is the only file
-  you'd touch to swap in real Postgres.
+It runs entirely on your machine against a local Hardhat blockchain, so no testnet ETH is needed.
 
-## Run it
+Team: Tanmay, Anup, Ayaan.
+
+## How it works
+
+```
+Browser (Next.js + RainbowKit)
+   |  1. connect wallet, sign SIWE message (EIP-4361)
+   |  2. admin: createVault / grantAccess / revoke  --->  Smart contract (Hardhat local chain)
+   v                                                          ^
+Rust backend (axum, :3001)                                    |
+   |  verify SIWE signature, issue JWT session                |
+   |  on every reveal: read permission live from the chain ---+
+   |  only if allowed: decrypt (AES-256-GCM)
+   v
+PostgreSQL (stores ciphertext, never plaintext)
+```
+
+## Stack
+
+| Layer | Technology |
+| :--- | :--- |
+| Smart contract | Solidity, Hardhat (`VaultAccessRegistry`: create vault, grant access with expiry, revoke, live-computed permission state) |
+| Frontend | Next.js 14 (TypeScript), Tailwind, RainbowKit + wagmi, the `siwe` package |
+| Backend | Rust: axum, sqlx, ethers-rs |
+| Database | PostgreSQL (via Docker Compose) |
+| Auth | Sign-In With Ethereum (server-issued nonce, signed message, JWT session) |
+| Encryption | AES-256-GCM, unique nonce per encryption |
+
+## Security properties (and the tests that cover them)
+
+The backend has 23 integration and unit tests; the contract has 14 Hardhat tests.
+
+*   **Authorize before decrypt.** A secret is decrypted only after the session is valid and the on-chain permission check passes.
+*   **Denied cases:** no permission, wrong wallet, expired permission, revoked permission (`vault_integration` tests).
+*   **Fail closed.** If the blockchain RPC is unavailable, the API returns 503 instead of guessing (`test_chain_unavailable_503`).
+*   **Tamper detection.** A modified ciphertext or auth tag fails decryption (`encryption` tests, `test_tampered_ciphertext_500`).
+*   **SIWE hardening:** a nonce can be used once and expires; wrong domain, wrong chain ID, and tampered signatures are rejected; revoked sessions are rejected; requests without an auth header return 401 (`auth_integration` tests).
+*   **Wallet addresses are normalized to lowercase** before touching the database, through a single helper.
+
+## Quick start
+
+Full instructions, environment variables, and troubleshooting are in **[SETUP.md](./SETUP.md)**. In short:
 
 ```bash
 npm install
 
-# Terminal 1 — local blockchain
-npm run chain
+# 1. database
+cd backend && docker compose up -d && cd ..
 
-# Terminal 2 — deploy the contract to it (writes lib/contract.json)
+# 2. local blockchain (leave running)
+npx hardhat node
+
+# 3. deploy the contract (writes lib/contract.json), then put the printed
+#    address in backend/.env (CONTRACT_ADDRESS) and .env.local
 npm run deploy:local
 
-# Terminal 2 (same) — start the app
+# 4. backend (reads the contract address once at startup)
+cd backend && cargo run
+
+# 5. frontend (new terminal, repo root)
 npm run dev
 ```
 
-Open http://localhost:3000. In MetaMask, add a network:
-- RPC URL: http://127.0.0.1:8545
-- Chain ID: 31337
+Open http://localhost:3000. In MetaMask, add the network RPC `http://127.0.0.1:8545`, chain ID `31337`, and import two of the private keys printed by `npx hardhat node`: one as the admin, one as the user. Use two separate browser profiles so each keeps its own wallet.
 
-Import one of the private keys `npx hardhat node` prints to your terminal
-into MetaMask (each has 10000 test ETH) — use one account as the admin,
-a second as the requesting user.
+## Demo flow
 
-## Demo flow (what "some result" looks like)
-1. Connect wallet on `/admin` (Hardhat account #0).
-2. Register a vault with a name and secret (e.g. "Prod DB password").
-   This calls `registerVault()` on-chain and encrypts+stores the secret.
-3. Grant access: paste the vault ID, a second wallet's address, and an
-   expiry a few minutes out. This calls `grantAccess()` on-chain.
-4. Switch MetaMask to the second account, go to `/user`.
-5. Enter the vault ID and click "Sign In & Request Access" — MetaMask
-   prompts a message signature (no password). The API verifies the
-   signature, checks `checkAccess()` on-chain, and returns the decrypted
-   secret only if both pass.
-6. Wait past the expiry and repeat — access is denied automatically,
-   enforced on-chain rather than in a backend flag.
-7. Check the Audit Log on `/admin` — every grant, access request, and
-   denial is logged.
+1.  **Admin** (`/admin`, Hardhat account #0): connect the wallet and sign in with Ethereum.
+2.  Create a vault with a name and a secret. MetaMask asks you to confirm an on-chain transaction; the secret is encrypted and stored by the backend.
+3.  Copy the vault ID and grant access to the second account's address with an expiry in the future.
+4.  **User** (`/user`, Hardhat account #1, in the other browser profile): connect and sign in. Only vaults granted to this wallet are listed.
+5.  Click **Reveal Secret**. The decrypted secret appears.
+6.  As admin, revoke the access on-chain. The user clicks **Reveal Secret** again without refreshing and is denied, because the backend re-checks the chain every time rather than caching the earlier approval.
+7.  A wallet that was never granted access is also denied.
 
-## Deploying to Arbitrum Sepolia instead
-Set `PRIVATE_KEY` and (optionally) `ARBITRUM_SEPOLIA_RPC` in a `.env`,
-then `npm run deploy:sepolia`. Switch `lib/wagmiConfig.ts`'s default chain
-and the `createPublicClient` chain in `app/api/vault/access/route.ts` to
-`arbitrumSepolia`, and add Arbitrum Sepolia + test ETH to MetaMask.
+## Project status
 
-## What's left for 100%
-- Swap the JSON-file store for real PostgreSQL.
-- Move signature verification + decryption into the planned Rust backend.
-- Add key-loss recovery / access delegation (flagged as a research gap
-  in the slides — worth a paragraph in the report, not required for demo).
-- Security audit / static analysis pass on the contract before any real
-  deployment.
+*   **Done and tested:** smart contract, Rust backend (SIWE, blockchain reads, encryption, vault and permissions API), frontend admin and user flows against the real backend.
+*   **Manual verification record:** see the checklist in SETUP.md (Section 7).
+*   **Not implemented yet:**
+    *   Activity/audit-log UI (the table is currently stubbed).
+    *   Sepolia or other public-testnet deployment.
+    *   Key-loss recovery and access delegation (a research gap noted in the project plan).
+    *   A security audit or static-analysis pass on the contract before any real deployment.
+*   **Known issues:** see SETUP.md (Sections 8 and 10).
+
+## Contributing
+
+Work on a branch and open a pull request; `main` must always pass `cargo test -- --test-threads=1` and `npm run build`. No mock data or silent fallbacks: if the backend or chain is down, the UI must show an error. See the Team Rules in SETUP.md.
