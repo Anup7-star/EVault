@@ -1,7 +1,5 @@
 import Link from "next/link";
 import ConnectWallet from "@/components/ConnectWallet";
-import VaultAccessMatrix from "@/components/VaultAccessMatrix";
-
 export default function Home() {
   return (
     <main className="mx-auto flex min-h-screen max-w-6xl flex-col items-center justify-center gap-10 px-4 sm:px-6 py-12 text-center">
@@ -78,11 +76,6 @@ export default function Home() {
           </div>
         </Link>
       </div>
-
-      {/* Live Interactive Vault Access Matrix */}
-      <section className="w-full text-left pt-6">
-        <VaultAccessMatrix />
-      </section>
     </main>
   );
 }
