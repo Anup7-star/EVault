@@ -90,7 +90,11 @@ export default function UserDashboard() {
         return newErrs;
       });
     } catch (err: any) {
-      setVaultErrors(prev => ({ ...prev, [vaultId]: err.message || "Access denied" }));
+      const baseMsg = err.message || "Access denied";
+      const displayMsg = baseMsg.includes("Access denied or expired")
+        ? `${baseMsg}. If this is your own vault, grant your own wallet access first.`
+        : baseMsg;
+      setVaultErrors(prev => ({ ...prev, [vaultId]: displayMsg }));
       setVaultSecrets(prev => {
         const newSecrets = { ...prev };
         delete newSecrets[vaultId];
