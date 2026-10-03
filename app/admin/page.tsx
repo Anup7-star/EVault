@@ -12,6 +12,16 @@ import { CONTRACT_ADDRESS, CONTRACT_ABI } from "@/lib/contract";
 // Deferred: Standalone error pages, responsive polish, dedicated transaction-status screen.
 // Audit log data source is stubbed for now but UI is preserved.
 
+function toDateTimeLocalString(date: Date): string {
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  const year = date.getFullYear();
+  const month = pad(date.getMonth() + 1);
+  const day = date.getDate();
+  const hours = pad(date.getHours());
+  const minutes = pad(date.getMinutes());
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+}
+
 export default function AdminDashboard() {
   const { address, isConnected } = useAccount();
   const chainId = useChainId();
@@ -31,7 +41,9 @@ export default function AdminDashboard() {
 
   const [grantVaultId, setGrantVaultId] = useState("");
   const [grantWallet, setGrantWallet] = useState("");
-  const [grantExpiry, setGrantExpiry] = useState("");
+  const [grantExpiry, setGrantExpiry] = useState(() => {
+    return toDateTimeLocalString(new Date(Date.now() + 24 * 60 * 60 * 1000));
+  });
   const [grantStatus, setGrantStatus] = useState<string>("");
 
   const [revokeVaultId, setRevokeVaultId] = useState("");
@@ -131,34 +143,55 @@ export default function AdminDashboard() {
   async function handleGrantAccess(e: React.FormEvent) {
     e.preventDefault();
     if (!publicClient || !token) return;
+
+    const trimmedVaultId = grantVaultId.trim();
+    const trimmedWallet = grantWallet.trim();
+
+    if (!trimmedVaultId) {
+      setGrantStatus("Permission grant couldn't be completed: Vault UUID is required.");
+      return;
+    }
+
+    if (!trimmedWallet) {
+      setGrantStatus("Permission grant couldn't be completed: Team Member Wallet Address is required.");
+      return;
+    }
+
+    const expiryMs = new Date(grantExpiry).getTime();
+    const nowMs = Date.now();
+    if (isNaN(expiryMs) || expiryMs < nowMs + 2 * 60 * 1000) {
+      setGrantStatus("Expiry must be at least 2 minutes in the future.");
+      return;
+    }
+
     setGrantStatus("Submitting access permission to the blockchain...");
     try {
-      const expiryTimestamp = BigInt(Math.floor(new Date(grantExpiry).getTime() / 1000));
+      const expiryTimestamp = BigInt(Math.floor(expiryMs / 1000));
       
       // Need the blockchain vault ID. We assume the user entered the UUID in grantVaultId.
       // Fetch vault details to get the blockchain ID.
-      const vault = await apiClient.getVault(token, grantVaultId);
+      const vault = await apiClient.getVault(token, trimmedVaultId);
       
       const hash = await writeContractAsync({
         address: CONTRACT_ADDRESS,
         abi: CONTRACT_ABI,
         functionName: "grantAccess",
-        args: [BigInt(vault.blockchainVaultId), grantWallet as `0x${string}`, 2, expiryTimestamp],
+        args: [BigInt(vault.blockchainVaultId), trimmedWallet as `0x${string}`, 2, expiryTimestamp],
       });
       setGrantStatus("Transaction sent! Confirming permission on-chain...");
       await publicClient.waitForTransactionReceipt({ hash });
 
       setGrantStatus("On-chain grant confirmed! Syncing with backend...");
-      await apiClient.grantPermission(token, grantVaultId, {
-         walletAddress: grantWallet,
+      await apiClient.grantPermission(token, trimmedVaultId, {
+         walletAddress: trimmedWallet,
          role: 2, // Hardcoded role 2 (viewer) for prototype
          expiresAt: new Date(grantExpiry).toISOString()
       });
 
-      setGrantStatus(`Success! Granted access for Vault to ${grantWallet.slice(0, 6)}...${grantWallet.slice(-4)}.`);
+      setGrantStatus(`Success! Granted access for Vault to ${trimmedWallet.slice(0, 6)}...${trimmedWallet.slice(-4)}.`);
       
       // Refresh permissions
-      const perms = await apiClient.listPermissions(token, grantVaultId);
+      const perms = await apiClient.listPermissions(token, trimmedVaultId);
       setPermissions(perms);
     } catch (err: any) {
       const errorMsg = err.shortMessage || err.message || "An unexpected issue occurred.";
@@ -389,6 +422,7 @@ export default function AdminDashboard() {
                     </label>
                     <input
                       type="datetime-local"
+                      min={toDateTimeLocalString(new Date())}
                       className="w-full rounded-xl border border-warm-border bg-warm-card px-4 py-2.5 text-sm text-warm-text outline-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
                       value={grantExpiry}
                       onChange={(e) => setGrantExpiry(e.target.value)}
@@ -420,7 +454,7 @@ export default function AdminDashboard() {
                 {grantStatus && (
                   <div
                     className={`rounded-xl p-3 text-xs leading-relaxed border font-mono ${
-                      grantStatus.includes("Error") || grantStatus.includes("couldn't")
+                      grantStatus.includes("Error") || grantStatus.includes("couldn't") || grantStatus.includes("Expiry must")
                         ? "bg-rose-950/30 border-rose-800/40 text-rose-300"
                         : grantStatus.includes("Success")
                         ? "bg-emerald-950/30 border-emerald-800/40 text-emerald-300"
