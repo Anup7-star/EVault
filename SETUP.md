@@ -107,6 +107,7 @@ cd ..
 4.  **Update `.env` File:**
     Copy the deployed contract address from Step 3 and paste it into:
     *   `backend/.env` as `CONTRACT_ADDRESS`
+
     *(Note: The frontend reads the address and ABI directly from `lib/contract.json`, which is written automatically by `npm run deploy:local` in Step 3).*
 5.  **Start Backend:**
     ```bash
