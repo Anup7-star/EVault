@@ -392,7 +392,7 @@ export default function AdminDashboard() {
 
                 {lastVaultId && (
                   <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 p-3 text-xs text-amber-200 break-all">
-                    💡 **Vault Created!** Your newly generated Vault UUID is <span className="font-mono font-bold underline text-white">{lastVaultId}</span>. Use this ID to grant member access below.
+                    💡 <strong className="font-bold">Vault Created!</strong> Your newly generated Vault UUID is <span className="font-mono font-bold underline text-white">{lastVaultId}</span>. Use this ID to grant member access below.
                   </div>
                 )}
               </form>
