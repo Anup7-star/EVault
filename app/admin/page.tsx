@@ -202,26 +202,40 @@ export default function AdminDashboard() {
   async function handleRevokeAccess(e: React.FormEvent) {
     e.preventDefault();
     if (!publicClient || !token) return;
+
+    const trimmedVaultId = revokeVaultId.trim();
+    const trimmedWallet = revokeWallet.trim();
+
+    if (!trimmedVaultId) {
+      setRevokeStatus("Revocation couldn't be completed: Vault UUID is required.");
+      return;
+    }
+
+    if (!trimmedWallet) {
+      setRevokeStatus("Revocation couldn't be completed: Team Member Wallet Address is required.");
+      return;
+    }
+
     setRevokeStatus("Submitting access revocation to the blockchain...");
     try {
-      const vault = await apiClient.getVault(token, revokeVaultId);
+      const vault = await apiClient.getVault(token, trimmedVaultId);
 
       const hash = await writeContractAsync({
         address: CONTRACT_ADDRESS,
         abi: CONTRACT_ABI,
         functionName: "revokeAccess",
-        args: [BigInt(vault.blockchainVaultId), revokeWallet as `0x${string}`],
+        args: [BigInt(vault.blockchainVaultId), trimmedWallet as `0x${string}`],
       });
       setRevokeStatus("Transaction sent! Confirming revocation on-chain...");
       await publicClient.waitForTransactionReceipt({ hash });
 
       setRevokeStatus("On-chain revoke confirmed! Syncing with backend...");
-      await apiClient.revokePermission(token, revokeVaultId, revokeWallet);
+      await apiClient.revokePermission(token, trimmedVaultId, trimmedWallet);
 
       setRevokeStatus(`Success! Access revoked.`);
       
       // Refresh permissions
-      const perms = await apiClient.listPermissions(token, revokeVaultId);
+      const perms = await apiClient.listPermissions(token, trimmedVaultId);
       setPermissions(perms);
     } catch (err: any) {
       const errorMsg = err.shortMessage || err.message || "An unexpected issue occurred.";
