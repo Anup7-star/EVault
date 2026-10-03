@@ -18,6 +18,7 @@ export default function UserDashboard() {
 
   const [authStatus, setAuthStatus] = useState("");
   const [vaults, setVaults] = useState<any[]>([]);
+  const [listError, setListError] = useState<string | null>(null);
   const [vaultSecrets, setVaultSecrets] = useState<Record<string, string>>({});
   const [vaultErrors, setVaultErrors] = useState<Record<string, string>>({});
 
@@ -35,16 +36,22 @@ export default function UserDashboard() {
   // Fetch vaults when authenticated
   useEffect(() => {
     if (token) {
+      setListError(null);
       apiClient.listVaults(token)
-        .then(setVaults)
+        .then((data) => {
+          setVaults(data);
+          setListError(null);
+        })
         .catch((err) => {
           console.error("Failed to list vaults:", err);
           setVaults([]);
+          setListError(err.message || "An unexpected error occurred.");
         });
     } else {
       setVaults([]);
       setVaultSecrets({});
       setVaultErrors({});
+      setListError(null);
     }
   }, [token]);
 
@@ -165,7 +172,11 @@ export default function UserDashboard() {
           </div>
 
           <h2 className="text-lg font-bold text-warm-text">Your Accessible Vaults</h2>
-          {vaults.length === 0 ? (
+          {listError ? (
+            <div className="rounded-xl p-3.5 text-xs bg-rose-950/30 border border-rose-800/40 text-rose-300 font-mono">
+              Couldn&apos;t load vaults: {listError}
+            </div>
+          ) : vaults.length === 0 ? (
             <p className="text-warm-muted text-sm italic">No vaults found.</p>
           ) : (
             <div className="grid gap-4">
