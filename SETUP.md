@@ -186,6 +186,7 @@ Run this with the Admin in one browser profile and the User in another (see Sect
 - [ ] 4. **Revoke, then reveal without refreshing.** Revoke on-chain as Admin. On the still-open user page, click Reveal Secret again. It must be denied ("Access denied or expired"). If the secret still appears, the backend is not re-checking the chain live; stop and fix it.
 - [ ] 5. **Ungranted account.** Sign in as Account #2 and try the same vault. It must be denied.
 - [ ] 6. **Expiry.** Grant with an expiry a few minutes ahead, wait until it passes, then click Reveal. It must be denied. If it still reveals, send any transaction to mine a block (Hardhat's block time only moves when blocks are mined) and retry.
+- [ ] 7. **Owner self-grant.** As Admin, grant a vault to the admin's own address with a future expiry, then Reveal Secret on the admin page. It should show the secret. If any layer rejects the self-grant, update the reveal policy in README.md and SETUP.md.
 
 Record the result and date next to each box before a demo.
 
@@ -198,13 +199,11 @@ Record the result and date next to each box before a demo.
 | **`EADDRINUSE` on port 8545** | Another Hardhat node is already running in the background. Find it with `netstat -ano \| findstr :8545`, note the PID, and kill it using `taskkill /PID <PID> /F`. |
 | **Wallet Address Comparisons** | All wallet addresses are normalized to lowercase at write time before touching the database (see `backend/src/utils.rs` `normalize_address()`). This is a deliberate invariant. Any new code that inserts or compares a `wallet_address` column must go through this helper, not add its own `.to_lowercase()`. |
 | **Transactions hang or fail after restarting the Hardhat node** | MetaMask's cached nonce is stale. Settings > Advanced > Clear activity tab data, for each account used. |
-| **Grant fails with "gas limit is 21000000 and exceeds transaction gas cap of 16777216"** | The message is misleading. The real cause is that `grantAccess` reverted (gas estimation failed, so MetaMask used a huge default). The cause found so far is an **expiry date in the past**. The date picker defaults to midnight today, which is already past. Use a future date/time (it is interpreted in your local time). The Hardhat node terminal prints the real revert reason. |
-| **Grant or other call returns 400 with `%20` in the URL / "UUID parsing failed: found ` ` at 0"** | The Vault UUID field has a leading space (usually from copying the banner text). Remove it. |
-| **Page still shows the admin session after switching MetaMask accounts** | Known bug: the frontend does not drop its SIWE session when the connected wallet changes. Disconnect, reload, and sign in again; use separate browser profiles for admin and user. |
+| **Grant fails with "gas limit is 21000000 and exceeds transaction gas cap of 16777216"** | The message is misleading. The real cause is that `grantAccess` reverted (gas estimation failed, so MetaMask used a huge default), most commonly due to an expiry date in the past. The admin form now rejects an expiry less than 2 minutes in the future before MetaMask opens; keep this in mind as a note for anyone calling the contract or API directly. The Hardhat node terminal prints the real revert reason. |
+| **Grant or other call returns 400 with `%20` in the URL / "UUID parsing failed: found ` ` at 0"** | The Vault UUID field had leading or trailing whitespace. The form now trims whitespace, but keep this in mind as a note for anyone calling the API directly. |
 | **Port 3000 busy / Next.js shifts port** | If port 3000 is busy, Next.js moves to another port (e.g. 3002) and sign-in fails against the backend's hardcoded `localhost:3000` SIWE domain; port 3001 would also clash with the backend. Free port 3000 instead (`netstat -ano \| findstr :3000` and kill the process). |
 | **Sign-in rejected** | Check, in this order: the app is opened at `http://localhost:3000` (domain `localhost:3000` is hardcoded in `backend/src/api/auth.rs`); MetaMask is on Hardhat Local (chain `31337`, also hardcoded); `CONTRACT_ADDRESS` in `backend/.env` matches a contract that exists on the current node. These have caused most past auth bugs. |
 | **UI looks healthy but the backend is down** | It should not. The frontend must show an error when the backend or chain is unreachable. If it shows data anyway, something is serving fake data; see Team Rules. |
-| **Banner shows literal `**Vault Created!**`** | Cosmetic; markdown asterisks are not rendered. |
 
 ## 9. Team Rules
 
@@ -215,14 +214,11 @@ Record the result and date next to each box before a demo.
 
 ## 10. Current Project Status
 
-*   **Completed:** Full backend (contract, SIWE auth, blockchain reads, encryption, vault/permissions API, all tested; 23/23 backend tests passing as of 2026-10-02). Frontend core loop verified manually against the real backend on 2026-10-02: Admin create vault and grant access, and the granted user signing in and revealing a decrypted secret.
+*   **Completed:** Full backend (contract, SIWE auth, blockchain reads, encryption, vault/permissions API, all tested; 23/23 backend tests passing as of 2026-10-02). Frontend core loop verified manually against the real backend on 2026-10-02: Admin create vault and grant access, and the granted user signing in and revealing a decrypted secret. Grant and revoke forms trim inputs and the grant form rejects an expiry less than 2 minutes ahead; the SIWE session is dropped when the connected wallet changes or disconnects; hardcoded sample grants were removed from the home page.
 *   **History:** Commit `8363456` reverted three commits (`33e20ff`, `bede957`, `5fe408d`) that added a mock API fallback, a separate Node.js server (`server.js`) and a stray submodule pointer (`idp/unishare`). The repository state matches `a8b3952` plus later work.
 *   **Needs manual verification and recording (Section 7):** revoke-then-reveal denial, ungranted-account denial, expiry denial.
 *   **Reveal Authorization Policy:** A grant is required for every wallet, including the vault owner; the owner can reveal their own vault by granting their own address. Reveal authorization is read live from the chain on every request (no caching), fails closed with 503 if the RPC is down, and decryption only happens after authorization succeeds.
 *   **Known issues and limitations:**
-    *   Grant form does not trim the Vault UUID or reject a past expiry before sending.
-    *   Frontend keeps its session when the connected wallet changes.
-    *   Literal `**` in the vault-created banner.
     *   A signed-in wallet can distinguish a nonexistent vault (404) from a denied one (403); vault IDs are random UUIDs, so this is low severity.
 *   **Deferred / Not Yet Implemented:**
     *   Sepolia testnet deployment (`npm run deploy:sepolia` script exists in `package.json` for Arbitrum Sepolia, but Sepolia deployment is untested).
