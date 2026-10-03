@@ -218,11 +218,12 @@ Record the result and date next to each box before a demo.
 *   **Completed:** Full backend (contract, SIWE auth, blockchain reads, encryption, vault/permissions API, all tested; 23/23 backend tests passing as of 2026-10-02). Frontend core loop verified manually against the real backend on 2026-10-02: Admin create vault and grant access, and the granted user signing in and revealing a decrypted secret.
 *   **History:** Commit `8363456` reverted three commits (`33e20ff`, `bede957`, `5fe408d`) that added a mock API fallback, a separate Node.js server (`server.js`) and a stray submodule pointer (`idp/unishare`). The repository state matches `a8b3952` plus later work.
 *   **Needs manual verification and recording (Section 7):** revoke-then-reveal denial, ungranted-account denial, expiry denial.
-*   **Known issues, fixes pending:**
+*   **Reveal Authorization Policy:** A grant is required for every wallet, including the vault owner; the owner can reveal their own vault by granting their own address. Reveal authorization is read live from the chain on every request (no caching), fails closed with 503 if the RPC is down, and decryption only happens after authorization succeeds.
+*   **Known issues and limitations:**
     *   Grant form does not trim the Vault UUID or reject a past expiry before sending.
     *   Frontend keeps its session when the connected wallet changes.
     *   Literal `**` in the vault-created banner.
-    *   Policy decision pending: whether a vault owner can reveal their own vault without a grant (the admin was denied when tried).
+    *   A signed-in wallet can distinguish a nonexistent vault (404) from a denied one (403); vault IDs are random UUIDs, so this is low severity.
 *   **Deferred / Not Yet Implemented:**
     *   Sepolia testnet deployment (`npm run deploy:sepolia` script exists in `package.json` for Arbitrum Sepolia, but Sepolia deployment is untested).
     *   Reconciliation of old documentation.

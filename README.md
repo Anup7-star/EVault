@@ -37,11 +37,13 @@ PostgreSQL (stores ciphertext, never plaintext)
 The backend has 23 integration and unit tests; the contract has 14 Hardhat tests.
 
 *   **Authorize before decrypt.** A secret is decrypted only after the session is valid and the on-chain permission check passes.
+*   **Reveal authorization policy:** A grant is required for every wallet, including the vault owner (the owner can reveal their own vault by granting their own address). Reveal authorization is read live from the chain on every request (no caching), fails closed with 503 if the RPC is down, and decryption only happens after authorization succeeds.
 *   **Denied cases:** no permission, wrong wallet, expired permission, revoked permission (`vault_integration` tests).
 *   **Fail closed.** If the blockchain RPC is unavailable, the API returns 503 instead of guessing (`test_chain_unavailable_503`).
 *   **Tamper detection.** A modified ciphertext or auth tag fails decryption (`encryption` tests, `test_tampered_ciphertext_500`).
 *   **SIWE hardening:** a nonce can be used once and expires; wrong domain, wrong chain ID, and tampered signatures are rejected; revoked sessions are rejected; requests without an auth header return 401 (`auth_integration` tests).
 *   **Wallet addresses are normalized to lowercase** before touching the database, through a single helper.
+*   **Known limitation:** A signed-in wallet can distinguish a nonexistent vault (404) from a denied one (403); vault IDs are random UUIDs, so this is low severity.
 
 ## Quick start
 
