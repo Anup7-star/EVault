@@ -102,6 +102,8 @@ cd ..
     ```
     *This deploys the contract, prints the address, and auto-writes it to `lib/contract.json`.*
     *Sanity check: on a fresh node with no earlier transactions, the first deploy from Hardhat Account #0 normally lands at `0x5FbDB2315678afecb367f032d93F642f64180aa3`. A different address is not an error by itself, but it means the node already had transactions.*
+    > [!NOTE]
+    > `lib/contract.json` is tracked in git because `lib/contract.ts` imports it and a fresh clone needs it to build. `npm run deploy:local` rewrites it. Commit it only when the contract ABI actually changed; if only the address differs, run `git checkout lib/contract.json` so a local deploy never lands in a commit.
 4.  **Update `.env` File:**
     Copy the deployed contract address from Step 3 and paste it into:
     *   `backend/.env` as `CONTRACT_ADDRESS`
