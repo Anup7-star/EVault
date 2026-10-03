@@ -9,7 +9,8 @@
     "chain": "hardhat node",
     "deploy:local": "hardhat run scripts/deploy.js --network localhost",
     "deploy:sepolia": "hardhat run scripts/deploy.js --network arbitrumSepolia",
-    "preflight": "powershell -ExecutionPolicy Bypass -File ./scripts/preflight.ps1"
+    "preflight": "powershell -ExecutionPolicy Bypass -File ./scripts/preflight.ps1",
+    "dev:up": "powershell -ExecutionPolicy Bypass -File ./scripts/dev-up.ps1"
   },
   "dependencies": {
     "@rainbow-me/rainbowkit": "^2.1.6",
