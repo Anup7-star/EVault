@@ -65,6 +65,17 @@ export default function AdminDashboard() {
     }
   }, [isConnected, address, token]);
 
+  // Reset session-derived states when token becomes null (e.g. disconnect or account switch)
+  useEffect(() => {
+    if (!token) {
+      setPermissions([]);
+      setLastVaultId("");
+      setRegisterStatus("");
+      setGrantStatus("");
+      setRevokeStatus("");
+    }
+  }, [token]);
+
   async function handleSignIn() {
     if (!address) return;
     setAuthStatus("Fetching secure nonce...");
