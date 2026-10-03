@@ -55,7 +55,6 @@ cp .env.local.example .env.local
 ```
 **Variables:**
 *   `NEXT_PUBLIC_BACKEND_URL`: URL of the Rust backend (e.g., `http://localhost:3001`). It must point at the Rust backend, never at a mock or a different server.
-*   `NEXT_PUBLIC_CONTRACT_ADDRESS`: The deployed address of the smart contract (you will fill this in Step 4).
 *   `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID`: Get a free ID from [cloud.walletconnect.com](https://cloud.walletconnect.com/). *(Note: A placeholder will cause a cosmetic relay-connection warning but won't block local functionality).*
 
 ### Backend `.env`
@@ -74,8 +73,11 @@ cd ..
     node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
     ```
 *   `SESSION_SECRET`: Secret key for JWT sessions.
-*   `SIWE_EXPECTED_DOMAIN`: Expected domain for SIWE (must be `localhost:3000` for local dev). Open the app at `http://localhost:3000`, not `127.0.0.1:3000`, or sign-in will be rejected for a domain mismatch.
-*   `SIWE_EXPECTED_CHAIN_ID`: Expected chain ID for SIWE (must be `31337` for Hardhat local node).
+*   `PORT`: Port for the backend HTTP server (defaults to `3001`).
+*   `RUST_LOG`: Log level for structured logging (defaults to `info`).
+
+> [!NOTE]
+> `SIWE_EXPECTED_DOMAIN` and `SIWE_EXPECTED_CHAIN_ID` are hardcoded in `backend/src/api/auth.rs` (`localhost:3000` and `31337`), so the app must be opened at exactly `http://localhost:3000` and MetaMask must be on chain `31337`.
 
 ## 4. Start Order
 
@@ -93,17 +95,17 @@ cd ..
     ```bash
     npx hardhat node
     ```
-    *Leave this terminal running. It will print 20 funded test accounts with private keys.*
+    *(Or use the alias `npm run chain`). Leave this terminal running. It will print 20 funded test accounts with private keys.*
 3.  **Deploy Contract:** Open a new terminal in the project root:
     ```bash
     npm run deploy:local
     ```
     *This deploys the contract, prints the address, and auto-writes it to `lib/contract.json`.*
     *Sanity check: on a fresh node with no earlier transactions, the first deploy from Hardhat Account #0 normally lands at `0x5FbDB2315678afecb367f032d93F642f64180aa3`. A different address is not an error by itself, but it means the node already had transactions.*
-4.  **Update `.env` Files:**
+4.  **Update `.env` File:**
     Copy the deployed contract address from Step 3 and paste it into:
     *   `backend/.env` as `CONTRACT_ADDRESS`
-    *   `.env.local` as `NEXT_PUBLIC_CONTRACT_ADDRESS`
+    *(Note: The frontend reads the address and ABI directly from `lib/contract.json`, which is written automatically by `npm run deploy:local` in Step 3).*
 5.  **Start Backend:**
     ```bash
     cd backend
@@ -127,7 +129,7 @@ cd ..
 ### Restarting the Hardhat node
 
 Stopping the node wipes the whole chain. After any restart:
-1.  Re-run `npm run deploy:local`, update both env files, and restart the backend (it reads the address only at startup).
+1.  Re-run `npm run deploy:local`, update `backend/.env`, and restart the backend (it reads the address only at startup).
 2.  In MetaMask, clear the activity tab data for each account you use (Settings > Advanced > Clear activity tab data). Otherwise MetaMask's cached nonce is ahead of the fresh chain and transactions hang or fail.
 3.  Postgres keeps its vault rows across node restarts while on-chain vault IDs start again from 0. If vault lists look wrong after a restart, reset the **dev** database (this deletes all local dev data): `cd backend`, then `docker compose down -v`, then `docker compose up -d`.
 
@@ -196,7 +198,8 @@ Record the result and date next to each box before a demo.
 | **Grant fails with "gas limit is 21000000 and exceeds transaction gas cap of 16777216"** | The message is misleading. The real cause is that `grantAccess` reverted (gas estimation failed, so MetaMask used a huge default). The cause found so far is an **expiry date in the past**. The date picker defaults to midnight today, which is already past. Use a future date/time (it is interpreted in your local time). The Hardhat node terminal prints the real revert reason. |
 | **Grant or other call returns 400 with `%20` in the URL / "UUID parsing failed: found ` ` at 0"** | The Vault UUID field has a leading space (usually from copying the banner text). Remove it. |
 | **Page still shows the admin session after switching MetaMask accounts** | Known bug: the frontend does not drop its SIWE session when the connected wallet changes. Disconnect, reload, and sign in again; use separate browser profiles for admin and user. |
-| **Sign-in rejected** | Check, in this order: `SIWE_EXPECTED_DOMAIN=localhost:3000` and `SIWE_EXPECTED_CHAIN_ID=31337` in `backend/.env`; you opened the app at `localhost:3000`; MetaMask is on Hardhat Local (31337); `CONTRACT_ADDRESS` matches a contract that exists on the current node. These four have caused most past auth bugs. |
+| **Port 3000 busy / Next.js shifts port** | If port 3000 is busy, Next.js moves to another port (e.g. 3002) and sign-in fails against the backend's hardcoded `localhost:3000` SIWE domain; port 3001 would also clash with the backend. Free port 3000 instead (`netstat -ano \| findstr :3000` and kill the process). |
+| **Sign-in rejected** | Check, in this order: the app is opened at `http://localhost:3000` (domain `localhost:3000` is hardcoded in `backend/src/api/auth.rs`); MetaMask is on Hardhat Local (chain `31337`, also hardcoded); `CONTRACT_ADDRESS` in `backend/.env` matches a contract that exists on the current node. These have caused most past auth bugs. |
 | **UI looks healthy but the backend is down** | It should not. The frontend must show an error when the backend or chain is unreachable. If it shows data anyway, something is serving fake data; see Team Rules. |
 | **Banner shows literal `**Vault Created!**`** | Cosmetic; markdown asterisks are not rendered. |
 
@@ -218,7 +221,7 @@ Record the result and date next to each box before a demo.
     *   Literal `**` in the vault-created banner.
     *   Policy decision pending: whether a vault owner can reveal their own vault without a grant (the admin was denied when tried).
 *   **Deferred / Not Yet Implemented:**
-    *   Sepolia testnet deployment.
+    *   Sepolia testnet deployment (`npm run deploy:sepolia` script exists in `package.json` for Arbitrum Sepolia, but Sepolia deployment is untested).
     *   Reconciliation of old documentation.
     *   Activity-log UI (table data source is currently stubbed/commented out).
     *   Polished error and transaction-status screens.

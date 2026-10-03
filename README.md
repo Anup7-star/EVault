@@ -57,7 +57,7 @@ cd backend && docker compose up -d && cd ..
 npx hardhat node
 
 # 3. deploy the contract (writes lib/contract.json), then put the printed
-#    address in backend/.env (CONTRACT_ADDRESS) and .env.local
+#    address in backend/.env (CONTRACT_ADDRESS)
 npm run deploy:local
 
 # 4. backend (reads the contract address once at startup)
