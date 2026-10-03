@@ -37,9 +37,14 @@ export default function UserDashboard() {
     if (token) {
       apiClient.listVaults(token)
         .then(setVaults)
-        .catch((err) => console.error("Failed to list vaults:", err));
+        .catch((err) => {
+          console.error("Failed to list vaults:", err);
+          setVaults([]);
+        });
     } else {
       setVaults([]);
+      setVaultSecrets({});
+      setVaultErrors({});
     }
   }, [token]);
 

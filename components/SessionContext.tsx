@@ -1,6 +1,7 @@
 "use client";
 
-import React, { createContext, useContext, useState, ReactNode } from "react";
+import React, { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import { useAccount } from "wagmi";
 
 type AuthStatus = "signed-out" | "signing-in" | "signed-in";
 
@@ -16,6 +17,7 @@ interface SessionContextType {
 const SessionContext = createContext<SessionContextType | undefined>(undefined);
 
 export function SessionProvider({ children }: { children: ReactNode }) {
+  const { address, isConnected } = useAccount();
   const [token, setToken] = useState<string | null>(null);
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
   const [status, setStatus] = useState<AuthStatus>("signed-out");
@@ -31,6 +33,17 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setWalletAddress(null);
     setStatus("signed-out");
   };
+
+  // Drop SIWE session if disconnected or if connected address differs from session address
+  useEffect(() => {
+    if (!isConnected || !address) {
+      if (token !== null || walletAddress !== null) {
+        clearSession();
+      }
+    } else if (walletAddress && address.toLowerCase() !== walletAddress.toLowerCase()) {
+      clearSession();
+    }
+  }, [isConnected, address, walletAddress, token]);
 
   return (
     <SessionContext.Provider
