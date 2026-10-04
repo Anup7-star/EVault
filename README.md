@@ -85,7 +85,7 @@ Open http://localhost:3000. In MetaMask, add the network RPC `http://127.0.0.1:8
 ## Project status
 
 *   **Done and tested:** smart contract, Rust backend (SIWE, blockchain reads, encryption, vault and permissions API), frontend admin and user flows against the real backend.
-*   **Manual verification record:** see the checklist in SETUP.md (Section 7). Core flows (create, grant, reveal, UI & direct on-chain revoke live check, owner self-grant, ungranted account) confirmed on 2026-10-04 cold-start test.
+*   **Manual verification record:** see the checklist in SETUP.md (Section 7). All manual verification items complete as of 2026-10-04.
 *   **Not implemented yet:**
     *   Activity/audit-log UI (the table is currently stubbed).
     *   Sepolia or other public-testnet deployment.
