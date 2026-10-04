@@ -65,7 +65,7 @@ if ($DryRun) {
     Write-Host "  Output: Read deployed contract address using regex 'deployed to:\s*(0x[a-fA-F0-9]{40})'."
 
     Write-Host "`nStep 4 (Backend Environment Sync):" -ForegroundColor Cyan
-    Write-Host "  Action: Update ONLY the line matching '(?m)^CONTRACT_ADDRESS\s*=.*$' in backend/.env (preserves byte encoding and line endings, writes with no BOM; prints 'backend/.env already up to date' if unchanged)."
+    Write-Host "  Action: Update ONLY the line matching '(?m)^CONTRACT_ADDRESS[ \t]*=[^\r\n]*' in backend/.env (preserves byte encoding and line endings, writes with no BOM; prints 'backend/.env already up to date' if unchanged)."
     Write-Host "  File Edit: backend/.env -> CONTRACT_ADDRESS=<deployed_address>"
 
     Write-Host "`nStep 5 (Database Startup):" -ForegroundColor Cyan
@@ -80,6 +80,7 @@ if ($DryRun) {
     Write-Host "`nStep 7 (Frontend Next.js Dev Server):" -ForegroundColor Cyan
     Write-Host "  Action: Launch 'npm run dev' from repo root in a new PowerShell window."
     Write-Host "  Window Command: powershell -NoExit -Command `"cd '$projectRoot'; npm run dev`""
+    Write-Host "  Wait: Poll TCP connection on 127.0.0.1:3000 until responsive (60s timeout)."
 
     Write-Host "`nStep 8 (Preflight Verification):" -ForegroundColor Cyan
     Write-Host "  Action: Execute 'scripts/preflight.ps1' to verify all 6 environment requirements."
@@ -163,10 +164,10 @@ $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 $envText = [System.IO.File]::ReadAllText($backendEnvPath, $utf8NoBom)
 $exactTargetLine = "CONTRACT_ADDRESS=$deployedAddress"
 
-if ($envText -match '(?m)^CONTRACT_ADDRESS\s*=\s*' + [regex]::Escape($deployedAddress) + '\s*$') {
+if ($envText -match '(?m)^CONTRACT_ADDRESS[ \t]*=[ \t]*' + [regex]::Escape($deployedAddress) + '[ \t]*(\r?)$') {
     Write-Host "backend/.env already up to date" -ForegroundColor Green
-} elseif ($envText -match '(?m)^CONTRACT_ADDRESS\s*=.*$') {
-    $newText = [regex]::Replace($envText, '(?m)^CONTRACT_ADDRESS\s*=.*$', $exactTargetLine)
+} elseif ($envText -match '(?m)^CONTRACT_ADDRESS[ \t]*=[^\r\n]*') {
+    $newText = [regex]::Replace($envText, '(?m)^CONTRACT_ADDRESS[ \t]*=[^\r\n]*', $exactTargetLine)
     [System.IO.File]::WriteAllText($backendEnvPath, $newText, $utf8NoBom)
     Write-Host "Updated CONTRACT_ADDRESS in backend/.env to $deployedAddress" -ForegroundColor Green
 } else {
@@ -226,10 +227,32 @@ if (-not $backendReady) {
 }
 Write-Host "Backend is healthy (http://localhost:3001/health returned 'ok')." -ForegroundColor Green
 
-# Step 7: Start Next.js frontend via npm run dev
+# Step 7: Start Next.js frontend via npm run dev and wait for port 3000
 Write-Host "`nStep 7: Starting Next.js frontend via npm run dev (port 3000)..." -ForegroundColor Cyan
 Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$projectRoot'; Write-Host '--- Next.js Frontend (port 3000) ---' -ForegroundColor Cyan; npm run dev"
-Start-Sleep -Seconds 3
+
+$frontendReady = $false
+$maxFrontendAttempts = 60
+for ($i = 1; $i -le $maxFrontendAttempts; $i++) {
+    Start-Sleep -Seconds 1
+    try {
+        $tcp = New-Object System.Net.Sockets.TcpClient
+        $iar = $tcp.BeginConnect("127.0.0.1", 3000, $null, $null)
+        $connected = $iar.AsyncWaitHandle.WaitOne(1000, $false)
+        if ($connected -and $tcp.Connected) {
+            $tcp.EndConnect($iar)
+            $tcp.Close()
+            $frontendReady = $true
+            break
+        }
+        $tcp.Close()
+    } catch {}
+}
+if (-not $frontendReady) {
+    Write-Host "Error in Step 7: Timed out waiting for frontend on port 3000." -ForegroundColor Red
+    exit 1
+}
+Write-Host "Frontend is listening on port 3000." -ForegroundColor Green
 
 # Step 8: Run preflight script
 Write-Host "`nStep 8: Running preflight checks..." -ForegroundColor Cyan
