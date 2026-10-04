@@ -175,6 +175,11 @@ To test the application locally with Hardhat:
 
 ## 6. Running Tests
 
+*   **No-Mocks Pattern Guard:**
+    ```bash
+    npm run check:no-mocks
+    ```
+    Scans `app/`, `components/`, and `lib/` to ensure no mock fallback APIs, mock JWTs, or client-side storage leaks exist. Exits 0 on clean pass, 1 on violation. Run this before committing or building.
 *   **Smart Contract Tests:**
     ```bash
     npx hardhat test
@@ -229,8 +234,8 @@ Record the result and date next to each box before a demo.
 
 Branch protection and PR templates are not enforced in this repository.
 
-*   **No mocks, no silent fallbacks.** The frontend should never serve fake or cached data when the backend or chain is unreachable. A past commit that added a mock API fallback made the UI look healthy while hiding real failures, and was reverted (see Section 10).
-*   **`main` should always pass the backend tests and `npm run build`.** Work on a branch and open a pull request instead of pushing to `main`.
+*   **No mocks, no silent fallbacks.** The frontend should never serve fake or cached data when the backend or chain is unreachable. Run `npm run check:no-mocks` before committing or building. A past commit that added a mock API fallback made the UI look healthy while hiding real failures, and was reverted (see Section 10).
+*   **`main` should always pass the backend tests, `npm run check:no-mocks`, and `npm run build`.** Work on a branch and open a pull request instead of pushing to `main`.
 *   **"Done" should include pasted evidence:** the raw `cargo test -- --test-threads=1` output, the raw `npm run build` output, and the manual-checklist steps (Section 7) the change touches. A description of what should work does not count.
 *   **Changes to auth, encryption, or the vault/secret authorization path** should have the full diff reviewed by a second person before merging.
 
