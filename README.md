@@ -43,6 +43,7 @@ The backend has 23 integration and unit tests; the contract has 14 Hardhat tests
 *   **Tamper detection.** A modified ciphertext or auth tag fails decryption (`encryption` tests, `test_tampered_ciphertext_500`).
 *   **SIWE hardening:** a nonce can be used once and expires; wrong domain, wrong chain ID, and tampered signatures are rejected; revoked sessions are rejected; requests without an auth header return 401 (`auth_integration` tests).
 *   **Wallet addresses are normalized to lowercase** before touching the database, through a single helper.
+*   **Database projection vs. on-chain truth:** The vault list and its ACTIVE/EXPIRED badge shown in the UI are read from the local database projection and can, in principle, drift from on-chain state. The actual authorization decision when revealing a secret always re-reads the blockchain live and ignores this cached state — confirmed by the on-chain-only revoke test in SETUP.md Section 7 item 4.
 *   **Known limitation:** A signed-in wallet can distinguish a nonexistent vault (404) from a denied one (403); vault IDs are random UUIDs, so this is low severity.
 
 ## Quick start
@@ -84,7 +85,7 @@ Open http://localhost:3000. In MetaMask, add the network RPC `http://127.0.0.1:8
 ## Project status
 
 *   **Done and tested:** smart contract, Rust backend (SIWE, blockchain reads, encryption, vault and permissions API), frontend admin and user flows against the real backend.
-*   **Manual verification record:** see the checklist in SETUP.md (Section 7).
+*   **Manual verification record:** see the checklist in SETUP.md (Section 7). Core flows (create, grant, reveal, UI & direct on-chain revoke live check, owner self-grant, ungranted account) confirmed on 2026-10-04 cold-start test.
 *   **Not implemented yet:**
     *   Activity/audit-log UI (the table is currently stubbed).
     *   Sepolia or other public-testnet deployment.
