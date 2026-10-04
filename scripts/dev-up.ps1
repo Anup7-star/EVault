@@ -4,7 +4,7 @@ param(
     [switch]$DryRun
 )
 
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Continue"
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 if (-not (Test-Path (Join-Path $projectRoot "package.json"))) {
@@ -62,15 +62,15 @@ if ($DryRun) {
 
     Write-Host "`nStep 3 (Smart Contract Deployment):" -ForegroundColor Cyan
     Write-Host "  Action: Run 'npm run deploy:local' in repository root."
-    Write-Host "  Output: Read deployed contract address from output (writes lib/contract.json automatically)."
+    Write-Host "  Output: Read deployed contract address using regex 'deployed to:\s*(0x[a-fA-F0-9]{40})'."
 
     Write-Host "`nStep 4 (Backend Environment Sync):" -ForegroundColor Cyan
-    Write-Host "  Action: Update ONLY the 'CONTRACT_ADDRESS' line in backend/.env with deployed address."
-    Write-Host "  File Edit: backend/.env -> CONTRACT_ADDRESS=<deployed_address> (all other lines untouched)."
+    Write-Host "  Action: Update ONLY the line matching '(?m)^CONTRACT_ADDRESS\s*=.*$' in backend/.env (preserves byte encoding and line endings, writes with no BOM; prints 'backend/.env already up to date' if unchanged)."
+    Write-Host "  File Edit: backend/.env -> CONTRACT_ADDRESS=<deployed_address>"
 
     Write-Host "`nStep 5 (Database Startup):" -ForegroundColor Cyan
     Write-Host "  Action: Run 'docker compose up -d' in backend/ directory."
-    Write-Host "  Wait: Poll docker compose container health until Postgres is healthy."
+    Write-Host "  Wait: Poll 'docker inspect --format ''{{.State.Health.Status}}'' evault-postgres' until 'healthy' (60s timeout)."
 
     Write-Host "`nStep 6 (Backend API Server):" -ForegroundColor Cyan
     Write-Host "  Action: Launch 'cargo run' in backend/ directory in a new PowerShell window."
@@ -86,7 +86,7 @@ if ($DryRun) {
 
     Write-Host "`nStep 9 (Post-Startup Reminder):" -ForegroundColor Cyan
     Write-Host "  Action: Print post-startup reminder:"
-    Write-Host "    - Clear MetaMask activity tab data for each account (resets cached nonces)."
+    Write-Host "    - Clear MetaMask's nonce data for each account you use: Settings > Developer tools > Delete activity and nonce data."
     Write-Host "    - If vault lists look wrong, dev database may hold rows from an earlier chain run."
     Write-Host "    - To reset dev database data: cd backend; docker compose down -v; docker compose up -d"
 
@@ -138,65 +138,68 @@ Write-Host "Hardhat node is ready (chainId 0x7a69)." -ForegroundColor Green
 
 # Step 3: Deploy contract locally
 Write-Host "`nStep 3: Deploying contract via npm run deploy:local..." -ForegroundColor Cyan
-$deployOutput = npm run deploy:local 2>&1 | Out-String
+$deployOutput = & npm.cmd run deploy:local 2>&1 | Out-String
 Write-Host $deployOutput
-$deployedAddress = $null
-if ($deployOutput -match '0x[a-fA-F0-9]{40}') {
-    $deployedAddress = $Matches[0]
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "Error in Step 3: npm run deploy:local failed with exit code $LASTEXITCODE." -ForegroundColor Red
+    exit 1
 }
-if (-not $deployedAddress) {
-    Write-Host "Error in Step 3: Could not determine deployed contract address from output." -ForegroundColor Red
+$deployedAddress = $null
+if ($deployOutput -match 'deployed to:\s*(0x[a-fA-F0-9]{40})') {
+    $deployedAddress = $Matches[1]
+} else {
+    Write-Host "Error in Step 3: Could not parse deployed address using regex 'deployed to:\s*(0x[a-fA-F0-9]{40})' from deploy:local output." -ForegroundColor Red
     exit 1
 }
 Write-Host "Contract deployed at: $deployedAddress" -ForegroundColor Green
 
-# Step 4: Update ONLY CONTRACT_ADDRESS in backend/.env
+# Step 4: Update ONLY CONTRACT_ADDRESS in backend/.env (byte-safe, no BOM)
 Write-Host "`nStep 4: Updating CONTRACT_ADDRESS in backend/.env..." -ForegroundColor Cyan
 if (-not (Test-Path $backendEnvPath)) {
     Write-Host "Error in Step 4: backend/.env file not found." -ForegroundColor Red
     exit 1
 }
-$envContent = Get-Content $backendEnvPath
-$updatedContent = @()
-$foundContractAddress = $false
+$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+$envText = [System.IO.File]::ReadAllText($backendEnvPath, $utf8NoBom)
+$exactTargetLine = "CONTRACT_ADDRESS=$deployedAddress"
 
-foreach ($line in $envContent) {
-    if ($line -match '^CONTRACT_ADDRESS\s*=') {
-        $updatedContent += "CONTRACT_ADDRESS=$deployedAddress"
-        $foundContractAddress = $true
-    } else {
-        $updatedContent += $line
-    }
+if ($envText -match '(?m)^CONTRACT_ADDRESS\s*=\s*' + [regex]::Escape($deployedAddress) + '\s*$') {
+    Write-Host "backend/.env already up to date" -ForegroundColor Green
+} elseif ($envText -match '(?m)^CONTRACT_ADDRESS\s*=.*$') {
+    $newText = [regex]::Replace($envText, '(?m)^CONTRACT_ADDRESS\s*=.*$', $exactTargetLine)
+    [System.IO.File]::WriteAllText($backendEnvPath, $newText, $utf8NoBom)
+    Write-Host "Updated CONTRACT_ADDRESS in backend/.env to $deployedAddress" -ForegroundColor Green
+} else {
+    Write-Host "Error in Step 4: Could not find CONTRACT_ADDRESS line in backend/.env to replace." -ForegroundColor Red
+    exit 1
 }
-if (-not $foundContractAddress) {
-    $updatedContent += "CONTRACT_ADDRESS=$deployedAddress"
-}
-
-$updatedContent | Set-Content $backendEnvPath -Encoding utf8
-Write-Host "Updated CONTRACT_ADDRESS in backend/.env to $deployedAddress" -ForegroundColor Green
 
 # Step 5: Start Postgres via docker compose up -d
 Write-Host "`nStep 5: Starting Postgres via docker compose in backend/..." -ForegroundColor Cyan
 Push-Location $backendDir
 try {
-    $composeUp = docker compose up -d 2>&1
+    $composeUp = & docker compose up -d 2>&1
     Write-Host ($composeUp | Out-String)
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Error in Step 5: docker compose up -d failed with exit code $LASTEXITCODE." -ForegroundColor Red
+        exit 1
+    }
 } finally {
     Pop-Location
 }
 
 $postgresHealthy = $false
-$maxPgAttempts = 30
+$maxPgAttempts = 60
 for ($i = 1; $i -le $maxPgAttempts; $i++) {
     Start-Sleep -Seconds 1
-    $composePs = docker compose -f (Join-Path $backendDir "docker-compose.yml") ps 2>&1 | Out-String
-    if ($composePs -match 'healthy' -or ($composePs -match 'evault-postgres' -and $composePs -match 'Up')) {
+    $healthStatus = (& docker inspect --format '{{.State.Health.Status}}' evault-postgres 2>&1 | Out-String).Trim()
+    if ($healthStatus -eq "healthy") {
         $postgresHealthy = $true
         break
     }
 }
 if (-not $postgresHealthy) {
-    Write-Host "Error in Step 5: Timed out waiting for Postgres container to become healthy." -ForegroundColor Red
+    Write-Host "Error in Step 5: Timed out waiting for Postgres container (evault-postgres) to become healthy (status was '$healthStatus')." -ForegroundColor Red
     exit 1
 }
 Write-Host "Postgres is healthy." -ForegroundColor Green
@@ -210,7 +213,7 @@ $maxBackendAttempts = 40
 for ($i = 1; $i -le $maxBackendAttempts; $i++) {
     Start-Sleep -Seconds 1
     try {
-        $health = curl.exe -s --max-time 2 http://localhost:3001/health
+        $health = & curl.exe -s --max-time 2 http://localhost:3001/health 2>&1 | Out-String
         if ($health -and $health.Trim() -eq "ok") {
             $backendReady = $true
             break
@@ -241,9 +244,7 @@ Write-Host "`n==================================================================
 Write-Host "DEV STACK IS READY!" -ForegroundColor Green
 Write-Host "================================================================================" -ForegroundColor Yellow
 Write-Host "Reminder:" -ForegroundColor Yellow
-Write-Host "  * A fresh Hardhat node wipes the chain. Clear MetaMask's activity tab data"
-Write-Host "    for each account you use (Settings > Advanced > Clear activity tab data)"
-Write-Host "    to reset cached nonces."
+Write-Host "  * Clear MetaMask's nonce data for each account you use: Settings > Developer tools > Delete activity and nonce data."
 Write-Host "  * If vault lists look wrong, the dev database may still hold rows from an"
 Write-Host "    earlier chain run. You can reset dev database data with:"
 Write-Host "      cd backend; docker compose down -v; docker compose up -d"
