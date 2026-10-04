@@ -656,3 +656,257 @@ async fn test_tampered_ciphertext_500(pool: PgPool) {
         "Secret must not appear in error response"
     );
 }
+
+// ── Test 8: Audit logs full lifecycle (VAULT_CREATED, ACCESS_GRANTED, SECRET_RETRIEVED, ACCESS_REVOKED) ─
+
+#[sqlx::test]
+async fn test_audit_logs_lifecycle(pool: PgPool) {
+    let (contract_client, contract_address, signer) = deploy_contract().await;
+    let contract_client = Arc::new(contract_client);
+    let (base_url, client) = setup_app(pool.clone(), contract_client).await;
+
+    let owner_wallet: LocalWallet = DEPLOYER_KEY
+        .parse::<LocalWallet>()
+        .unwrap()
+        .with_chain_id(signer.get_chainid().await.unwrap().as_u64());
+    let owner_token = siwe_login(&base_url, &client, &owner_wallet).await;
+
+    // 1. On-chain create vault + API create vault (creates VAULT_CREATED log)
+    let contract_binding = VaultAccessRegistry::new(contract_address, signer.clone());
+    contract_binding
+        .create_vault("ipfs://audit-test".into())
+        .send()
+        .await
+        .unwrap()
+        .await
+        .unwrap();
+
+    let vault_count = {
+        let c = ContractClient::new(HARDHAT_RPC_URL, &format!("{:?}", contract_address)).unwrap();
+        c.get_vault_count().await.unwrap()
+    };
+    let blockchain_vault_id = vault_count - 1;
+    let vault_id = api_create_vault(
+        &base_url,
+        &client,
+        &owner_token,
+        blockchain_vault_id,
+        "audit-secret",
+    )
+    .await;
+
+    // 2. Grant access via API (creates ACCESS_GRANTED log)
+    let grantee = LocalWallet::new(&mut rand::thread_rng())
+        .with_chain_id(signer.get_chainid().await.unwrap().as_u64());
+    let grantee_addr_str = format!("0x{}", hex::encode(grantee.address().as_bytes()));
+    let expires_dt = chrono::Utc::now() + chrono::Duration::hours(2);
+
+    let grant_res = client
+        .post(format!("{}/vaults/{}/permissions", base_url, vault_id))
+        .bearer_auth(&owner_token)
+        .json(&json!({
+            "walletAddress": grantee_addr_str,
+            "role": 2,
+            "expiresAt": expires_dt.to_rfc3339(),
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(grant_res.status().as_u16(), 204);
+
+    // Grant on-chain as well so reveal passes
+    let expires_unix = expires_dt.timestamp() as u64;
+    contract_binding
+        .grant_access(
+            blockchain_vault_id.into(),
+            grantee.address(),
+            2,
+            expires_unix.into(),
+        )
+        .send()
+        .await
+        .unwrap()
+        .await
+        .unwrap();
+
+    // 3. Reveal secret as grantee (creates SECRET_RETRIEVED log)
+    let grantee_token = siwe_login(&base_url, &client, &grantee).await;
+    let secret_res = client
+        .get(format!("{}/vaults/{}/secret", base_url, vault_id))
+        .bearer_auth(&grantee_token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(secret_res.status().as_u16(), 200);
+
+    // 4. Revoke access via API (creates ACCESS_REVOKED log)
+    let revoke_res = client
+        .delete(format!(
+            "{}/vaults/{}/permissions/{}",
+            base_url, vault_id, grantee_addr_str
+        ))
+        .bearer_auth(&owner_token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(revoke_res.status().as_u16(), 204);
+
+    // 5. Query audit logs as owner
+    let logs_res = client
+        .get(format!("{}/vaults/{}/audit-logs", base_url, vault_id))
+        .bearer_auth(&owner_token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(logs_res.status().as_u16(), 200);
+    let logs: Vec<Value> = logs_res.json().await.unwrap();
+
+    assert_eq!(logs.len(), 4, "Expected exactly 4 audit logs for the lifecycle");
+
+    // Ordered timestamp DESC: REVOKED -> RETRIEVED -> GRANTED -> CREATED
+    assert_eq!(logs[0]["action"].as_str().unwrap(), "ACCESS_REVOKED");
+    assert_eq!(logs[1]["action"].as_str().unwrap(), "SECRET_RETRIEVED");
+    assert_eq!(logs[2]["action"].as_str().unwrap(), "ACCESS_GRANTED");
+    assert_eq!(logs[3]["action"].as_str().unwrap(), "VAULT_CREATED");
+
+    // Validate structure of logs
+    for log in &logs {
+        assert!(log.get("id").is_some());
+        assert!(log.get("action").is_some());
+        assert!(log.get("requestId").is_some());
+        assert!(log.get("timestamp").is_some());
+    }
+}
+
+// ── Test 9: Audit logs non-owner → 403 ────────────────────────────────────────
+
+#[sqlx::test]
+async fn test_audit_logs_non_owner_403(pool: PgPool) {
+    let (contract_client, contract_address, signer) = deploy_contract().await;
+    let contract_client = Arc::new(contract_client);
+    let (base_url, client) = setup_app(pool, contract_client).await;
+
+    let owner_wallet: LocalWallet = DEPLOYER_KEY
+        .parse::<LocalWallet>()
+        .unwrap()
+        .with_chain_id(signer.get_chainid().await.unwrap().as_u64());
+    let owner_token = siwe_login(&base_url, &client, &owner_wallet).await;
+
+    let contract_binding = VaultAccessRegistry::new(contract_address, signer.clone());
+    contract_binding
+        .create_vault("ipfs://audit-non-owner".into())
+        .send()
+        .await
+        .unwrap()
+        .await
+        .unwrap();
+
+    let vault_count = {
+        let c = ContractClient::new(HARDHAT_RPC_URL, &format!("{:?}", contract_address)).unwrap();
+        c.get_vault_count().await.unwrap()
+    };
+    let blockchain_vault_id = vault_count - 1;
+    let vault_id = api_create_vault(
+        &base_url,
+        &client,
+        &owner_token,
+        blockchain_vault_id,
+        "secret",
+    )
+    .await;
+
+    // Authenticate as a non-owner wallet
+    let non_owner = LocalWallet::new(&mut rand::thread_rng())
+        .with_chain_id(signer.get_chainid().await.unwrap().as_u64());
+    let non_owner_token = siwe_login(&base_url, &client, &non_owner).await;
+
+    let res = client
+        .get(format!("{}/vaults/{}/audit-logs", base_url, vault_id))
+        .bearer_auth(&non_owner_token)
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status().as_u16(), 403, "Non-owner must receive 403");
+}
+
+// ── Test 10: Audit logs nonexistent vault → 404 ───────────────────────────────
+
+#[sqlx::test]
+async fn test_audit_logs_nonexistent_404(pool: PgPool) {
+    let (contract_client, _, signer) = deploy_contract().await;
+    let contract_client = Arc::new(contract_client);
+    let (base_url, client) = setup_app(pool, contract_client).await;
+
+    let owner_wallet: LocalWallet = DEPLOYER_KEY
+        .parse::<LocalWallet>()
+        .unwrap()
+        .with_chain_id(signer.get_chainid().await.unwrap().as_u64());
+    let owner_token = siwe_login(&base_url, &client, &owner_wallet).await;
+
+    let fake_vault_id = Uuid::new_v4();
+    let res = client
+        .get(format!("{}/vaults/{}/audit-logs", base_url, fake_vault_id))
+        .bearer_auth(&owner_token)
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status().as_u16(), 404, "Nonexistent vault must return 404");
+}
+
+// ── Test 11: Audit logs empty activity → 200 [] ──────────────────────────────
+
+#[sqlx::test]
+async fn test_audit_logs_empty_array_200(pool: PgPool) {
+    let (contract_client, contract_address, signer) = deploy_contract().await;
+    let contract_client = Arc::new(contract_client);
+    let (base_url, client) = setup_app(pool.clone(), contract_client).await;
+
+    let owner_wallet: LocalWallet = DEPLOYER_KEY
+        .parse::<LocalWallet>()
+        .unwrap()
+        .with_chain_id(signer.get_chainid().await.unwrap().as_u64());
+    let owner_token = siwe_login(&base_url, &client, &owner_wallet).await;
+
+    let contract_binding = VaultAccessRegistry::new(contract_address, signer.clone());
+    contract_binding
+        .create_vault("ipfs://audit-empty".into())
+        .send()
+        .await
+        .unwrap()
+        .await
+        .unwrap();
+
+    let vault_count = {
+        let c = ContractClient::new(HARDHAT_RPC_URL, &format!("{:?}", contract_address)).unwrap();
+        c.get_vault_count().await.unwrap()
+    };
+    let blockchain_vault_id = vault_count - 1;
+    let vault_id = api_create_vault(
+        &base_url,
+        &client,
+        &owner_token,
+        blockchain_vault_id,
+        "secret",
+    )
+    .await;
+
+    // Delete the VAULT_CREATED log to simulate a vault with no logs
+    sqlx::query!("DELETE FROM audit_logs WHERE vault_id = $1", vault_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let res = client
+        .get(format!("{}/vaults/{}/audit-logs", base_url, vault_id))
+        .bearer_auth(&owner_token)
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status().as_u16(), 200, "Empty logs should return 200 OK");
+    let logs: Vec<Value> = res.json().await.unwrap();
+    assert!(logs.is_empty(), "Logs should be empty array");
+}
+

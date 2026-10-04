@@ -10,7 +10,6 @@ import { apiClient } from "@/lib/apiClient";
 import { CONTRACT_ADDRESS, CONTRACT_ABI } from "@/lib/contract";
 
 // Deferred: Standalone error pages, responsive polish, dedicated transaction-status screen.
-// Audit log data source is stubbed for now but UI is preserved.
 
 function toDateTimeLocalString(date: Date): string {
   const pad = (n: number) => n.toString().padStart(2, "0");
@@ -20,6 +19,56 @@ function toDateTimeLocalString(date: Date): string {
   const hours = pad(date.getHours());
   const minutes = pad(date.getMinutes());
   return `${year}-${month}-${day}T${hours}:${minutes}`;
+}
+
+function mapAuditAction(action: string): string {
+  switch (action) {
+    case "VAULT_CREATED":
+      return "Vault created";
+    case "ACCESS_GRANTED":
+      return "Access granted";
+    case "SECRET_RETRIEVED":
+      return "Secret revealed";
+    case "ACCESS_REVOKED":
+      return "Access revoked";
+    case "AUTH_SUCCESS":
+      return "Sign-in successful";
+    case "AUTH_FAILURE":
+      return "Sign-in failed";
+    case "ACCESS_DENIED":
+      return "Access denied";
+    case "DECRYPTION_FAILURE":
+      return "Decryption failed";
+    default:
+      return action.replace(/_/g, " ").toLowerCase().replace(/^\w/, (c) => c.toUpperCase());
+  }
+}
+
+function formatMetadata(metadata: any): string | null {
+  if (!metadata || typeof metadata !== "object") return null;
+  const parts: string[] = [];
+  if (metadata.grantee) {
+    const g = String(metadata.grantee);
+    parts.push(`Grantee: ${g.slice(0, 6)}...${g.slice(-4)}`);
+  }
+  if (metadata.revoked_wallet) {
+    const r = String(metadata.revoked_wallet);
+    parts.push(`Revoked: ${r.slice(0, 6)}...${r.slice(-4)}`);
+  }
+  if (metadata.role !== undefined) {
+    parts.push(`Role: ${metadata.role === 2 ? "Viewer (2)" : metadata.role}`);
+  }
+  if (metadata.expires_at) {
+    try {
+      parts.push(`Expires: ${new Date(metadata.expires_at).toLocaleString()}`);
+    } catch (_) {
+      parts.push(`Expires: ${metadata.expires_at}`);
+    }
+  }
+  if (metadata.blockchain_vault_id !== undefined) {
+    parts.push(`Chain Vault #${metadata.blockchain_vault_id}`);
+  }
+  return parts.length > 0 ? parts.join(" • ") : null;
 }
 
 export default function AdminDashboard() {
@@ -51,6 +100,9 @@ export default function AdminDashboard() {
   const [revokeStatus, setRevokeStatus] = useState<string>("");
 
   const [permissions, setPermissions] = useState<any[]>([]);
+  const [auditLogs, setAuditLogs] = useState<any[]>([]);
+  const [auditLogsStatus, setAuditLogsStatus] = useState<string>("");
+  const [activeVaultId, setActiveVaultId] = useState<string>("");
 
   const contractReady = CONTRACT_ADDRESS && CONTRACT_ADDRESS !== "0x0000000000000000000000000000000000000000";
 
@@ -69,6 +121,9 @@ export default function AdminDashboard() {
   useEffect(() => {
     if (!token) {
       setPermissions([]);
+      setAuditLogs([]);
+      setAuditLogsStatus("");
+      setActiveVaultId("");
       setLastVaultId("");
       setRegisterStatus("");
       setGrantStatus("");
@@ -141,10 +196,13 @@ export default function AdminDashboard() {
       });
 
       setLastVaultId(res.id); // UUID from backend
+      setGrantVaultId(res.id);
+      setRevokeVaultId(res.id);
       setRegisterStatus(`Success! Vault created on-chain (#${blockchainVaultId}) and secured in backend (UUID: ${res.id}).`);
       setVaultName("");
       setVaultDescription("");
       setVaultSecret("");
+      loadVaultActivity(res.id);
     } catch (err: any) {
       const errorMsg = err.shortMessage || err.message || "An unexpected issue occurred.";
       setRegisterStatus(`Registration couldn't be completed: ${errorMsg}`);
@@ -201,9 +259,8 @@ export default function AdminDashboard() {
 
       setGrantStatus(`Success! Granted access for Vault to ${trimmedWallet.slice(0, 6)}...${trimmedWallet.slice(-4)}.`);
       
-      // Refresh permissions
-      const perms = await apiClient.listPermissions(token, trimmedVaultId);
-      setPermissions(perms);
+      // Refresh permissions & activity logs
+      loadVaultActivity(trimmedVaultId);
     } catch (err: any) {
       const errorMsg = err.shortMessage || err.message || "An unexpected issue occurred.";
       setGrantStatus(`Permission grant couldn't be completed: ${errorMsg}`);
@@ -245,22 +302,41 @@ export default function AdminDashboard() {
 
       setRevokeStatus(`Success! Access revoked.`);
       
-      // Refresh permissions
-      const perms = await apiClient.listPermissions(token, trimmedVaultId);
-      setPermissions(perms);
+      // Refresh permissions & activity logs
+      loadVaultActivity(trimmedVaultId);
     } catch (err: any) {
       const errorMsg = err.shortMessage || err.message || "An unexpected issue occurred.";
       setRevokeStatus(`Revocation couldn't be completed: ${errorMsg}`);
     }
   }
   
-  async function loadPermissions(vaultId: string) {
+  async function loadVaultActivity(vaultId: string) {
     if (!token) return;
+    const trimmed = vaultId.trim();
+    setActiveVaultId(trimmed);
+    if (!trimmed) {
+      setPermissions([]);
+      setAuditLogs([]);
+      setAuditLogsStatus("");
+      return;
+    }
+
     try {
-        const perms = await apiClient.listPermissions(token, vaultId);
-        setPermissions(perms);
-    } catch (e) {
-        setPermissions([]);
+      const perms = await apiClient.listPermissions(token, trimmed);
+      setPermissions(perms);
+    } catch {
+      setPermissions([]);
+    }
+
+    setAuditLogsStatus("Loading activity logs...");
+    try {
+      const logs = await apiClient.getAuditLogs(token, trimmed);
+      setAuditLogs(logs);
+      setAuditLogsStatus("");
+    } catch (err: any) {
+      const errorMsg = err.message || "Failed to load activity logs";
+      setAuditLogs([]);
+      setAuditLogsStatus(errorMsg);
     }
   }
 
@@ -434,8 +510,8 @@ export default function AdminDashboard() {
                       placeholder="e.g. 123e4567..."
                       value={grantVaultId}
                       onChange={(e) => {
-                          setGrantVaultId(e.target.value);
-                          if(e.target.value.length > 30) loadPermissions(e.target.value);
+                        setGrantVaultId(e.target.value);
+                        if (e.target.value.trim().length >= 32) loadVaultActivity(e.target.value);
                       }}
                       required
                     />
@@ -516,7 +592,10 @@ export default function AdminDashboard() {
                       className="w-full rounded-xl border border-warm-border bg-warm-card px-4 py-2.5 text-sm text-warm-text placeholder-warm-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500/60 font-mono"
                       placeholder="e.g. 123e4567..."
                       value={revokeVaultId}
-                      onChange={(e) => setRevokeVaultId(e.target.value)}
+                      onChange={(e) => {
+                        setRevokeVaultId(e.target.value);
+                        if (e.target.value.trim().length >= 32) loadVaultActivity(e.target.value);
+                      }}
                       required
                     />
                   </div>
@@ -560,8 +639,9 @@ export default function AdminDashboard() {
           </div>
 
           {/* Audit Log / Permissions Column */}
-          <div className="lg:col-span-5">
-             <section className="h-full rounded-2xl border border-warm-border bg-warm-surface p-6 shadow-md flex flex-col mb-8">
+          <div className="lg:col-span-5 space-y-8">
+            {/* Permissions Section */}
+            <section className="rounded-2xl border border-warm-border bg-warm-surface p-6 shadow-md flex flex-col">
               <div className="mb-4">
                 <h2 className="text-lg font-bold text-warm-text flex items-center gap-2">
                   <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-amber-500/10 text-amber-400 text-sm">
@@ -569,24 +649,29 @@ export default function AdminDashboard() {
                   </span>
                   Current Permissions
                 </h2>
-                <p className="text-[11px] text-warm-muted">View permissions for selected Vault ID.</p>
+                <p className="text-[11px] text-warm-muted">
+                  {activeVaultId ? `Active permissions for ${activeVaultId.slice(0, 8)}...` : "Select or enter a Vault UUID above to view permissions"}
+                </p>
               </div>
-              <div className="flex-1 overflow-y-auto space-y-3 pr-1 text-xs">
-                 {permissions.length === 0 ? (
-                    <div className="text-warm-muted text-center italic p-4">No permissions found or no valid vault ID selected.</div>
-                 ) : (
-                    permissions.map((p, idx) => (
-                       <div key={idx} className="rounded-xl border border-warm-border p-3 text-warm-text bg-warm-card">
-                          <p><strong>Wallet:</strong> <span className="font-mono">{p.walletAddress?.slice(0, 10) ?? "Unknown"}...</span></p>
-                          <p><strong>Status:</strong> {p.active ? "ACTIVE" : "REVOKED"}</p>
-                          <p><strong>Expires:</strong> {new Date(p.expiresAt).toLocaleString()}</p>
-                       </div>
-                    ))
-                 )}
+              <div className="flex-1 overflow-y-auto space-y-3 pr-1 text-xs max-h-48">
+                {!activeVaultId ? (
+                  <div className="text-warm-muted text-center italic p-4">No vault selected yet.</div>
+                ) : permissions.length === 0 ? (
+                  <div className="text-warm-muted text-center italic p-4">No active permissions found for this vault.</div>
+                ) : (
+                  permissions.map((p, idx) => (
+                    <div key={idx} className="rounded-xl border border-warm-border p-3 text-warm-text bg-warm-card">
+                      <p><strong>Wallet:</strong> <span className="font-mono">{p.walletAddress?.slice(0, 10) ?? "Unknown"}...</span></p>
+                      <p><strong>Status:</strong> {p.active ? "ACTIVE" : "REVOKED"}</p>
+                      <p><strong>Expires:</strong> {new Date(p.expiresAt).toLocaleString()}</p>
+                    </div>
+                  ))
+                )}
               </div>
-             </section>
+            </section>
 
-            <section className="h-full rounded-2xl border border-warm-border bg-warm-surface p-6 shadow-md flex flex-col opacity-50">
+            {/* Activity Log Section */}
+            <section className="rounded-2xl border border-warm-border bg-warm-surface p-6 shadow-md flex flex-col">
               <div className="mb-4 flex items-center justify-between">
                 <div>
                   <h2 className="text-lg font-bold text-warm-text flex items-center gap-2">
@@ -595,18 +680,82 @@ export default function AdminDashboard() {
                     </span>
                     Activity Log
                   </h2>
-                  <p className="text-[11px] text-warm-muted">On-chain and system event history</p>
+                  <p className="text-[11px] text-warm-muted">
+                    {activeVaultId ? `Audit history for ${activeVaultId.slice(0, 8)}...` : "Recent security and access events"}
+                  </p>
                 </div>
               </div>
 
-              <div className="flex-1 max-h-[720px] overflow-y-auto space-y-3 pr-1 text-xs">
+              <div className="flex-1 max-h-[480px] overflow-y-auto space-y-3 pr-1 text-xs">
+                {auditLogsStatus && auditLogs.length === 0 ? (
+                  <div className="rounded-xl border border-rose-800/40 bg-rose-950/20 p-4 text-center text-rose-300">
+                    {auditLogsStatus}
+                  </div>
+                ) : !activeVaultId ? (
                   <div className="flex flex-col items-center justify-center h-48 text-center p-6 border border-dashed border-warm-border rounded-xl">
                     <span className="text-2xl mb-2">📋</span>
-                    <p className="text-warm-muted font-medium text-xs">Activity logs temporarily unavailable</p>
+                    <p className="text-warm-muted font-medium text-xs">Select or enter a Vault UUID to view activity logs</p>
+                  </div>
+                ) : auditLogs.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center h-48 text-center p-6 border border-dashed border-warm-border rounded-xl">
+                    <span className="text-2xl mb-2">📋</span>
+                    <p className="text-warm-muted font-medium text-xs">No activity yet</p>
                     <p className="text-[11px] text-warm-muted/70 mt-1 max-w-xs">
-                      // TODO: Wire up a GET /audit-logs endpoint to the backend audit_logs table.
+                      Security events (vault creation, grants, reveals, revokes) will be recorded here automatically.
                     </p>
                   </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="border-b border-warm-border text-[11px] text-warm-muted uppercase tracking-wider">
+                          <th className="py-2.5 px-2 font-semibold">Time</th>
+                          <th className="py-2.5 px-2 font-semibold">Action</th>
+                          <th className="py-2.5 px-2 font-semibold">Wallet</th>
+                          <th className="py-2.5 px-2 font-semibold">Details</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-warm-border/50">
+                        {auditLogs.map((log) => {
+                          const metaStr = formatMetadata(log.metadata);
+                          const actionLabel = mapAuditAction(log.action);
+                          return (
+                            <tr key={log.id} className="hover:bg-warm-card/50 transition-colors">
+                              <td className="py-2 px-2 text-warm-muted text-[11px] whitespace-nowrap">
+                                {new Date(log.timestamp).toLocaleString()}
+                              </td>
+                              <td className="py-2 px-2 whitespace-nowrap">
+                                <span
+                                  className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                                    log.action === "VAULT_CREATED"
+                                      ? "bg-amber-500/10 text-amber-300 border border-amber-500/20"
+                                      : log.action === "ACCESS_GRANTED"
+                                      ? "bg-emerald-500/10 text-emerald-300 border border-emerald-500/20"
+                                      : log.action === "SECRET_RETRIEVED"
+                                      ? "bg-blue-500/10 text-blue-300 border border-blue-500/20"
+                                      : log.action === "ACCESS_REVOKED"
+                                      ? "bg-rose-500/10 text-rose-300 border border-rose-500/20"
+                                      : "bg-stone-800 text-stone-300"
+                                  }`}
+                                >
+                                  {actionLabel}
+                                </span>
+                              </td>
+                              <td className="py-2 px-2 font-mono text-warm-text text-[11px] whitespace-nowrap">
+                                {log.walletAddress
+                                  ? `${log.walletAddress.slice(0, 6)}...${log.walletAddress.slice(-4)}`
+                                  : "—"}
+                              </td>
+                              <td className="py-2 px-2 text-[11px] text-warm-muted">
+                                {metaStr || "—"}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             </section>
           </div>

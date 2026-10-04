@@ -130,6 +130,17 @@ pub struct PermissionItem {
     pub active: bool,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuditLogItem {
+    pub id: Uuid,
+    pub wallet_address: Option<String>,
+    pub action: String,
+    pub request_id: Option<Uuid>,
+    pub metadata: Option<serde_json::Value>,
+    pub timestamp: DateTime<Utc>,
+}
+
 // ── Request bodies ───────────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
@@ -622,6 +633,55 @@ pub async fn revoke_permission(
     Ok(StatusCode::NO_CONTENT)
 }
 
+// ── GET /vaults/:vaultId/audit-logs  (owner-only) ───────────────────────────
+// Returns up to 50 most recent audit log entries for the specified vault.
+// 50 entries limit is sufficient for current project scale without pagination.
+
+pub async fn list_audit_logs(
+    State(state): State<Arc<VaultState>>,
+    wallet: AuthenticatedWallet,
+    Path(vault_id): Path<Uuid>,
+) -> Result<Json<Vec<AuditLogItem>>, VaultError> {
+    let caller = &wallet.0;
+
+    // Verify vault exists and caller is the owner
+    let row = sqlx::query!(r#"SELECT owner_wallet FROM vaults WHERE id = $1"#, vault_id)
+        .fetch_optional(&state.pool)
+        .await?
+        .ok_or(VaultError::NotFound)?;
+
+    if row.owner_wallet != *caller {
+        return Err(VaultError::Forbidden("Owner only".to_string()));
+    }
+
+    let logs = sqlx::query!(
+        r#"
+        SELECT id, wallet_address, action, request_id, metadata, timestamp
+        FROM audit_logs
+        WHERE vault_id = $1
+        ORDER BY timestamp DESC
+        LIMIT 50
+        "#,
+        vault_id
+    )
+    .fetch_all(&state.pool)
+    .await?;
+
+    let items: Vec<AuditLogItem> = logs
+        .into_iter()
+        .map(|l| AuditLogItem {
+            id: l.id,
+            wallet_address: l.wallet_address,
+            action: l.action,
+            request_id: l.request_id,
+            metadata: l.metadata,
+            timestamp: l.timestamp,
+        })
+        .collect();
+
+    Ok(Json(items))
+}
+
 // ── Router ────────────────────────────────────────────────────────────────────
 
 pub fn router(pool: PgPool, contract: Arc<ContractClient>, session_secret: String) -> Router {
@@ -635,6 +695,7 @@ pub fn router(pool: PgPool, contract: Arc<ContractClient>, session_secret: Strin
         .route("/vaults", post(create_vault).get(list_vaults))
         .route("/vaults/:vaultId", get(get_vault))
         .route("/vaults/:vaultId/secret", get(get_vault_secret))
+        .route("/vaults/:vaultId/audit-logs", get(list_audit_logs))
         .route(
             "/vaults/:vaultId/permissions",
             get(list_permissions).post(grant_permission),

@@ -71,4 +71,8 @@ export const apiClient = {
       method: "DELETE",
       headers: { Authorization: `Bearer ${token}` },
     }),
+  getAuditLogs: (token: string, vaultId: string) =>
+    fetchApi(`/vaults/${vaultId}/audit-logs`, {
+      headers: { Authorization: `Bearer ${token}` },
+    }),
 };
