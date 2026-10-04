@@ -6,10 +6,15 @@
 //!   3. Connect to Postgres and run pending sqlx migrations
 //!   4. Build the axum router and start listening
 
-use axum::{routing::get, Router};
+use axum::{
+    http::{header, HeaderValue, Method},
+    routing::get,
+    Router,
+};
 use sqlx::postgres::PgPoolOptions;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use tower_http::cors::CorsLayer;
 use tracing::info;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
@@ -49,6 +54,11 @@ async fn main() -> anyhow::Result<()> {
     let contract_address = std::env::var("CONTRACT_ADDRESS").expect("CONTRACT_ADDRESS must be set");
 
     let session_secret = std::env::var("SESSION_SECRET").expect("SESSION_SECRET must be set");
+
+    let frontend_origin = std::env::var("FRONTEND_ORIGIN").expect("FRONTEND_ORIGIN must be set");
+    let frontend_origin_header: HeaderValue = frontend_origin
+        .parse()
+        .expect("FRONTEND_ORIGIN must be a valid header value");
 
     // 4. Postgres connection pool
     info!("Connecting to Postgres…");
@@ -111,8 +121,12 @@ async fn main() -> anyhow::Result<()> {
         .layer(tower_http::request_id::SetRequestIdLayer::x_request_id(
             tower_http::request_id::MakeRequestUuid,
         ))
-        // TODO: Restrict CORS origin to frontend URL in production
-        .layer(tower_http::cors::CorsLayer::permissive());
+        .layer(
+            CorsLayer::new()
+                .allow_origin(frontend_origin_header)
+                .allow_methods([Method::GET, Method::POST, Method::DELETE])
+                .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION]),
+        );
 
     // 9. Start server
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
