@@ -26,7 +26,7 @@ Before starting, ensure you have the following installed. Run the provided comma
 
 1.  **Clone the repository:**
     ```bash
-    git clone <repository_url> evault
+    git clone https://github.com/Anup7-star/EVault evault
     cd evault
     ```
 2.  **Install Frontend & Hardhat Dependencies (Root):**
@@ -81,6 +81,10 @@ cd ..
 
 ## 4. Start Order
 
+### One-command start
+
+`npm run dev:up` starts the node, deploys, updates only the `CONTRACT_ADDRESS` line of `backend/.env`, starts Postgres, backend and frontend in separate windows, then runs preflight; it refuses to start if ports 8545, 3001 or 3000 are in use, kills nothing, and never resets the database; a dry run is `npm run dev:up -- -DryRun`.
+
 > [!WARNING]
 > **Order Matters!** The backend reads the `CONTRACT_ADDRESS` only once at startup. If you deploy the contract *after* starting the backend, or forget to update the `.env`, the backend will silently point to a nonexistent contract and API calls will fail.
 
@@ -121,6 +125,12 @@ cd ..
     ```
 7.  **Verify, do not assume:**
     ```bash
+    npm run preflight
+    ```
+    Six read-only checks (node on 8545/31337, contract code at `CONTRACT_ADDRESS`, `lib/contract.json` equals `backend/.env`, backend `/health`, Postgres container, port 3000), exit code 0 on pass and 1 on failure, prints no secrets. *Limit:* it cannot see which contract address the running backend loaded, so restart the backend after every redeploy.
+
+    You can also verify endpoints directly:
+    ```bash
     curl.exe http://localhost:3001/health
     ```
     It must print `ok`. To confirm the contract really exists on your node (replace the address with yours):
@@ -133,7 +143,7 @@ cd ..
 
 Stopping the node wipes the whole chain. After any restart:
 1.  Re-run `npm run deploy:local`, update `backend/.env`, and restart the backend (it reads the address only at startup).
-2.  In MetaMask, clear the activity tab data for each account you use (Settings > Advanced > Clear activity tab data). Otherwise MetaMask's cached nonce is ahead of the fresh chain and transactions hang or fail.
+2.  In MetaMask, clear the activity and nonce data for each account you use: Settings > Developer tools > Delete activity and nonce data (older MetaMask versions: Settings > Advanced > Clear activity tab data). Otherwise MetaMask's cached nonce is ahead of the fresh chain and transactions hang or fail.
 3.  Postgres keeps its vault rows across node restarts while on-chain vault IDs start again from 0. If vault lists look wrong after a restart, reset the **dev** database (this deletes all local dev data): `cd backend`, then `docker compose down -v`, then `docker compose up -d`.
 
 ## 5. MetaMask Setup for Local Testing
@@ -185,12 +195,15 @@ Run this with the Admin in one browser profile and the User in another (see Sect
 
 - [x] 1. **Create vault.** As Admin (`0xf39F...2266`) on `localhost:3000/admin`, create a vault with a distinctive secret (for example `evault-test-7391`). MetaMask must show a transaction confirmation, the Hardhat node terminal must print an `eth_sendTransaction`, and the Network tab must show a **201** from `localhost:3001`. *(Verified 2026-10-04, cold-start run — Hardhat block #2, backend log "Vault created" with correct wallet/vault_id).*
 - [x] 2. **Grant.** Grant the vault to Account #1 (`0x7099...79C8`) with an expiry **in the future** (at least a day ahead). Confirm the transaction and check for a successful `permissions` call. *(Verified 2026-10-04, cold-start run — Hardhat block #3).*
-- [x] 3. **Reveal (granted).** As Account #1 on `localhost:3000/user`, sign in, check the page says "signed in as 0x70997970...79C8", and click Reveal Secret. The text must match what was typed in step 1 exactly. *(Verified 2026-10-04, cold-start run — backend log "Secret retrieved" at 06:59:25 matching wallet 0x70997... and the correct vault_id).*
+- [x] 3. **Reveal (granted).** As Account #1 on `localhost:3000/user`, sign in, check the page says "signed in as 0x70997970...79C8", and click Reveal Secret. The text must match what was typed in step 1 exactly. *(Verified 2026-10-04, cold-start run — backend log "Secret retrieved" at 06:59:25 matching wallet 0x70997... and the correct vault_id; manual test run by the project team; no raw logs archived).*
 - [x] 4. **Revoke, then reveal without refreshing.** Revoke on-chain as Admin. On the still-open user page, click Reveal Secret again. It must be denied ("Access denied or expired"). If the secret still appears, the backend is not re-checking the chain live; stop and fix it. *(Verified 2026-10-04 twice — once via the app UI [success banner, vault list emptied for the user], once via direct on-chain revoke through the Hardhat console bypassing the app entirely [database untouched, vault still listed ACTIVE in the UI, but the next Reveal attempt correctly returned "Access denied or expired"] — this specifically proves the backend re-checks the chain live on every request rather than trusting a cached or database-stored permission state).*
 - [x] 5. **Owner self-grant / self-access.** As Admin, grant a vault to the admin's own address with a future expiry, then Reveal Secret on the admin page. It should show the secret. *(Verified 2026-10-04 — admin was denied on its own vaults until it explicitly granted its own address, then could reveal; this confirms there is no implicit owner bypass of the permission check).*
-- [x] 6. **Expiry.** Grant with an expiry a few minutes ahead, wait until it passes, then click Reveal. It must be denied. If it still reveals, send any transaction to mine a block (Hardhat's block time only moves when blocks are mined) and retry. *(Verified 2026-10-04 — granted with a short 2-minute expiry, waited for expiration, mined a block on Hardhat via a state transaction to advance block.timestamp, then clicked Reveal; request was denied with "Access denied or expired").*
+- [x] 6. **Expiry.** Grant with an expiry a few minutes ahead, wait until it passes, then click Reveal. It must be denied. If it still reveals, send any transaction to mine a block (Hardhat's block time only moves when blocks are mined) and retry. *(Verified 2026-10-04 — granted with a short expiry a few minutes ahead (the form requires at least 2 minutes), waited for expiration, mined a block on Hardhat via a state transaction to advance block.timestamp, then clicked Reveal; request was denied with "Access denied or expired"; manual test run by the project team; no raw logs archived).*
 - [x] 7. **Ungranted account.** Sign in as Account #2 and try the same vault. It must be denied. *(Verified 2026-10-04 via UI [empty list] — backend-level denial already covered by automated test suite `test_no_permission_denied`).*
-- [x] 8. **Browser session drop checks.** Switch MetaMask account and disconnect wallet; confirm session token is dropped and UI resets without full page reload. *(Verified 2026-10-04 — account switch confirmed: switching active MetaMask account immediately dropped the SIWE token and re-prompted for a new SIWE signature for the newly connected wallet; disconnect confirmed: disconnecting wallet immediately cleared session state and returned both /admin and /user to the connect-wallet state without requiring a page reload).*
+- [x] 8. **Browser session drop checks.** Switch MetaMask account and disconnect wallet; confirm session token is dropped and UI resets without full page reload. *(Verified 2026-10-04 — account switch confirmed: switching active MetaMask account immediately dropped the SIWE token and re-prompted for a new SIWE signature for the newly connected wallet; disconnect confirmed: disconnecting wallet immediately cleared session state and returned both /admin and /user to the connect-wallet state without requiring a page reload; manual test run by the project team; no raw logs archived).*
+- [ ] 9. **Past-expiry form:** a past or under-2-minute expiry shows 'Expiry must be at least 2 minutes in the future' and MetaMask does not open.
+- [ ] 10. Rejecting the new signature request after an account switch does not cause repeated popups.
+- [ ] 11. After an account switch, a previously revealed secret disappears from the screen.
 
 Record the result and date next to each box before a demo.
 
@@ -202,25 +215,27 @@ Record the result and date next to each box before a demo.
 | **"Access is denied (os error 5)"** | When running `cargo test` or `cargo run` on Windows, this means a process is still holding the `.exe` file locked, most often your own running `cargo run`. Stop it with Ctrl+C, or find and kill it (`Get-Process evault-backend \| Stop-Process`) before retrying. |
 | **`EADDRINUSE` on port 8545** | Another Hardhat node is already running in the background. Find it with `netstat -ano \| findstr :8545`, note the PID, and kill it using `taskkill /PID <PID> /F`. |
 | **Wallet Address Comparisons** | All wallet addresses are normalized to lowercase at write time before touching the database (see `backend/src/utils.rs` `normalize_address()`). This is a deliberate invariant. Any new code that inserts or compares a `wallet_address` column must go through this helper, not add its own `.to_lowercase()`. |
-| **Transactions hang or fail after restarting the Hardhat node** | MetaMask's cached nonce is stale. Settings > Advanced > Clear activity tab data, for each account used. |
-| **Grant fails with "gas limit is 21000000 and exceeds transaction gas cap of 16777216"** | The message is misleading. The real cause is that `grantAccess` reverted (gas estimation failed, so MetaMask used a huge default), most commonly due to an expiry date in the past. The admin form now rejects an expiry less than 2 minutes in the future before MetaMask opens; keep this in mind as a note for anyone calling the contract or API directly. The Hardhat node terminal prints the real revert reason. |
+| **Transactions hang or fail after restarting the Hardhat node** | MetaMask's cached nonce is stale. Settings > Developer tools > Delete activity and nonce data (older MetaMask versions: Settings > Advanced > Clear activity tab data), for each account used. |
+| **Grant fails with "gas limit is 21000000 and exceeds transaction gas cap of 16777216"** | The message is misleading. The real cause is that `grantAccess` reverted (gas estimation failed, so MetaMask used a huge default). Causes seen: expiry in the past; non-owner account ("Not vault owner"; grant and revoke are owner-only); vault does not exist on the current chain ("Vault does not exist", e.g. after a chain reset). The admin form now rejects an expiry less than 2 minutes in the future before MetaMask opens; keep this in mind as a note for anyone calling the contract or API directly. The Hardhat node terminal prints the real revert reason. |
 | **Grant or other call returns 400 with `%20` in the URL / "UUID parsing failed: found ` ` at 0"** | The Vault UUID field had leading or trailing whitespace. The form now trims whitespace, but keep this in mind as a note for anyone calling the API directly. |
 | **Port 3000 busy / Next.js shifts port** | If port 3000 is busy, Next.js moves to another port (e.g. 3002) and sign-in fails against the backend's hardcoded `localhost:3000` SIWE domain; port 3001 would also clash with the backend. Free port 3000 instead (`netstat -ano \| findstr :3000` and kill the process). |
 | **Sign-in rejected** | Check, in this order: the app is opened at `http://localhost:3000` (domain `localhost:3000` is hardcoded in `backend/src/api/auth.rs`); MetaMask is on Hardhat Local (chain `31337`, also hardcoded); `CONTRACT_ADDRESS` in `backend/.env` matches a contract that exists on the current node. These have caused most past auth bugs. |
-| **UI looks healthy but the backend is down** | It should not. The frontend must show an error when the backend or chain is unreachable. If it shows data anyway, something is serving fake data; see Team Rules. |
+| **UI looks healthy but the backend is down** | It should not. The frontend must show an error when the backend or chain is unreachable. If it shows data anyway, something is serving fake data; see Team Guidelines. |
 
-## 9. Team Rules
+## 9. Team Guidelines
 
-*   **No mocks, no silent fallbacks.** The frontend must never serve fake or cached data when the backend or chain is unreachable. A past commit that added a mock API fallback made the UI look healthy while hiding real failures, and was reverted (see Section 10).
-*   **`main` must always pass the backend tests and `npm run build`.** Work on a branch and open a pull request instead of pushing to `main`.
-*   **"Done" requires pasted evidence:** the raw `cargo test -- --test-threads=1` output, the raw `npm run build` output, and the manual-checklist steps (Section 7) the change touches. A description of what should work does not count.
-*   **Changes to auth, encryption, or the vault/secret authorization path** need the full diff reviewed by a second person before merging.
+Branch protection and PR templates are not enforced in this repository.
+
+*   **No mocks, no silent fallbacks.** The frontend should never serve fake or cached data when the backend or chain is unreachable. A past commit that added a mock API fallback made the UI look healthy while hiding real failures, and was reverted (see Section 10).
+*   **`main` should always pass the backend tests and `npm run build`.** Work on a branch and open a pull request instead of pushing to `main`.
+*   **"Done" should include pasted evidence:** the raw `cargo test -- --test-threads=1` output, the raw `npm run build` output, and the manual-checklist steps (Section 7) the change touches. A description of what should work does not count.
+*   **Changes to auth, encryption, or the vault/secret authorization path** should have the full diff reviewed by a second person before merging.
 
 ## 10. Current Project Status
 
-*   **Completed:** Full backend (contract, SIWE auth, blockchain reads, encryption, vault/permissions API, all tested; 23/23 backend tests passing as of 2026-10-02). Frontend core loop and authorization invariants verified manually against the real backend on cold-start run (2026-10-04): Admin create vault, grant access, granted user sign-in and reveal, owner self-grant, direct on-chain revoke live check, and ungranted account rejection. Grant and revoke forms trim inputs and the grant form rejects an expiry less than 2 minutes ahead; the SIWE session is dropped when the connected wallet changes or disconnects; hardcoded sample grants were removed from the home page. One-command startup script (`npm run dev:up`) verified clean cold-start execution on 2026-10-04 from a fully torn-down state (Docker volume removed, all ports freed) with preflight 6/6 passing.
+*   **Completed:** Full backend (contract, SIWE auth, blockchain reads, encryption, vault/permissions API, all tested; 23/23 backend tests passing as of 2026-10-02). Frontend core loop and authorization invariants verified manually against the real backend on cold-start run (2026-10-04): Admin create vault, grant access, granted user sign-in and reveal, owner self-grant, direct on-chain revoke live check, and ungranted account rejection. Grant and revoke forms trim inputs and the grant form rejects an expiry less than 2 minutes ahead; the SIWE session is dropped when the connected wallet changes or disconnects; hardcoded sample grants were removed from the home page. One-command startup script (`npm run dev:up`) verified clean cold-start execution on 2026-10-04 from a fully torn-down state (Docker volume removed, all ports freed) with preflight 6/6 passing (manual test run by the project team; no raw logs archived).
 *   **History:** Commit `8363456` reverted three commits (`33e20ff`, `bede957`, `5fe408d`) that added a mock API fallback, a separate Node.js server (`server.js`) and a stray submodule pointer (`idp/unishare`). The repository state matches `a8b3952` plus later work.
-*   **Manual verification status (Section 7):** All Section 7 manual verification checklist items are complete as of 2026-10-04.
+*   **Manual verification status (Section 7):** Items 1 to 8 are recorded as complete on 2026-10-04; items 9 to 11 are pending.
 *   **Reveal Authorization Policy:** A grant is required for every wallet, including the vault owner; the owner can reveal their own vault by granting their own address. Reveal authorization is read live from the chain on every request (no caching), fails closed with 503 if the RPC is down, and decryption only happens after authorization succeeds.
 *   **Known issues and limitations:**
     *   **Database projection vs. on-chain truth:** The vault list and its ACTIVE/EXPIRED badge shown in the UI are read from the local database projection and can, in principle, drift from on-chain state. The actual authorization decision when revealing a secret always re-reads the blockchain live and ignores this cached state — confirmed by the on-chain-only revoke test in Section 7 item 4.

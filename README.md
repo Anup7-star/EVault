@@ -70,6 +70,8 @@ cd backend && cargo run
 npm run dev
 ```
 
+Or run steps 1 to 5 with `npm run dev:up` (see SETUP.md Section 4).
+
 Open http://localhost:3000. In MetaMask, add the network RPC `http://127.0.0.1:8545`, chain ID `31337`, and import two of the private keys printed by `npx hardhat node`: one as the admin, one as the user. Use two separate browser profiles so each keeps its own wallet.
 
 ## Demo flow
@@ -85,7 +87,7 @@ Open http://localhost:3000. In MetaMask, add the network RPC `http://127.0.0.1:8
 ## Project status
 
 *   **Done and tested:** smart contract, Rust backend (SIWE, blockchain reads, encryption, vault and permissions API), frontend admin and user flows against the real backend.
-*   **Manual verification record:** see the checklist in SETUP.md (Section 7). All manual verification items complete as of 2026-10-04.
+*   **Manual verification record:** see the checklist in SETUP.md (Section 7). Items 1 to 8 recorded as complete on 2026-10-04; items 9 to 11 pending.
 *   **Not implemented yet:**
     *   Activity/audit-log UI (the table is currently stubbed).
     *   Sepolia or other public-testnet deployment.
@@ -95,4 +97,4 @@ Open http://localhost:3000. In MetaMask, add the network RPC `http://127.0.0.1:8
 
 ## Contributing
 
-Work on a branch and open a pull request; `main` must always pass `cargo test -- --test-threads=1` and `npm run build`. No mock data or silent fallbacks: if the backend or chain is down, the UI must show an error. See the Team Rules in SETUP.md.
+Suggested workflow: use a branch and a pull request; `main` should always pass `cargo test -- --test-threads=1` and `npm run build`. No mock data or silent fallbacks: if the backend or chain is down, the UI must show an error. See the Team Guidelines in SETUP.md.
