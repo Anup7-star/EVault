@@ -247,9 +247,61 @@ Branch protection and PR templates are not enforced in this repository.
 *   **Reveal Authorization Policy:** A grant is required for every wallet, including the vault owner; the owner can reveal their own vault by granting their own address. Reveal authorization is read live from the chain on every request (no caching), fails closed with 503 if the RPC is down, and decryption only happens after authorization succeeds.
 *   **Known issues and limitations:**
     *   **Database projection vs. on-chain truth:** The vault list and its ACTIVE/EXPIRED badge shown in the UI are read from the local database projection and can, in principle, drift from on-chain state. The actual authorization decision when revealing a secret always re-reads the blockchain live and ignores this cached state — confirmed by the on-chain-only revoke test in Section 7 item 4.
-    *   A signed-in wallet can distinguish a nonexistent vault (404) from a denied one (403); vault IDs are random UUIDs, so this is low severity.
+*   **Status of Testnet Deployment:**
+    *   **Arbitrum Sepolia Deployment & E2E Verification Complete (2026-10-04):** Contract deployed to `0xA4B7295B1c1e69d91EAC319C7B86ff5De45e93E9` (Chain ID `421614`). Full live lifecycle verified on Arbitrum Sepolia: on-chain vault creation, on-chain time-bound access grant, SIWE authentication, and browser-based grantee secret decryption.
 *   **Deferred / Not Yet Implemented:**
-    *   Sepolia testnet deployment (`npm run deploy:sepolia` script exists in `package.json` for Arbitrum Sepolia, but Sepolia deployment is untested).
-    *   Reconciliation of old documentation.
     *   Activity-log UI (table data source is currently stubbed/commented out).
     *   Polished error and transaction-status screens.
+
+---
+
+## 11. Running against Arbitrum Sepolia Testnet
+
+The smart contract is deployed on **Arbitrum Sepolia** testnet. You can run the stack against the live testnet instead of the local Hardhat node.
+
+### Deployment Details
+*   **Network:** Arbitrum Sepolia
+*   **Chain ID:** `421614`
+*   **Contract Address:** [`0xA4B7295B1c1e69d91EAC319C7B86ff5De45e93E9`](https://sepolia.arbiscan.io/address/0xA4B7295B1c1e69d91EAC319C7B86ff5De45e93E9)
+*   **Deployment Tx:** [`0x2d08302cbdfdadd5151b743e0d2d534d63aae7cfe0a0f46932197ee132fae33c`](https://sepolia.arbiscan.io/tx/0x2d08302cbdfdadd5151b743e0d2d534d63aae7cfe0a0f46932197ee132fae33c)
+
+### Environment Differences from Local Development
+
+1. **Root `.env.local`**:
+   ```env
+   ARBITRUM_SEPOLIA_RPC_URL=https://arb-sepolia.g.alchemy.com/v2/<YOUR_ALCHEMY_KEY>
+   PRIVATE_KEY=<DEPLOYER_PRIVATE_KEY_HEX>
+   NEXT_PUBLIC_BACKEND_URL=http://localhost:3001
+   NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=<YOUR_WALLETCONNECT_ID>
+   ```
+
+2. **Backend `backend/.env`**:
+   ```env
+   DATABASE_URL=postgres://evault:evault@localhost:5432/evault
+   RPC_URL=https://arb-sepolia.g.alchemy.com/v2/<YOUR_ALCHEMY_KEY>
+   CONTRACT_ADDRESS=0xA4B7295B1c1e69d91EAC319C7B86ff5De45e93E9
+   SIWE_EXPECTED_DOMAIN=localhost:3000
+   SIWE_EXPECTED_CHAIN_ID=421614
+   FRONTEND_ORIGIN=http://localhost:3000
+   ENCRYPTION_KEY_HEX=<32_BYTE_HEX_KEY>
+   SESSION_SECRET=dev_secret_change_in_production
+   PORT=3001
+   RUST_LOG=info
+   ```
+
+### Running the Live Smoke Test Script
+To execute an automated test cycle against Arbitrum Sepolia:
+```bash
+# 1. Check deployer wallet balance
+node scripts/check-balance.js
+
+# 2. Run the end-to-end smoke test
+npx hardhat run scripts/sepolia-smoke-test.js --network arbitrumSepolia
+```
+
+### Verified Live End-to-End Cycle (2026-10-04)
+*   **Admin Deployer Wallet:** `0x0E6d746fA0910E6BAeD8286B4c526039507E165B`
+*   **Grantee Wallet:** `0x8e504e0404b53Fd219C31Dd5B4E2E759288eBcEB`
+*   **Create Vault Tx:** [`0xfa24d13659e519d57ac1a9b4c6629139eeb229f18ecbcdf66379d8baf20dc596`](https://sepolia.arbiscan.io/tx/0xfa24d13659e519d57ac1a9b4c6629139eeb229f18ecbcdf66379d8baf20dc596) (Block `315751201`)
+*   **Grant Access Tx:** [`0xa2180613b22d520eae562e7e9e2400db1ee39662663bbfa027626938ee3bdb91`](https://sepolia.arbiscan.io/tx/0xa2180613b22d520eae562e7e9e2400db1ee39662663bbfa027626938ee3bdb91) (Block `315751919`, Role 2, 15m expiry)
+*   **Grantee Reveal:** Confirmed decrypted on `http://localhost:3000/user` with test secret `"sepolia-deploy-test-2026-10-04"`.

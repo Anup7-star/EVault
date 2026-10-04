@@ -5,6 +5,10 @@ const path = require("path");
 async function main() {
   const Registry = await hre.ethers.getContractFactory("VaultAccessRegistry");
   const registry = await Registry.deploy();
+  const tx = registry.deploymentTransaction();
+  if (tx) {
+    console.log("Deployment transaction hash:", tx.hash);
+  }
   await registry.waitForDeployment();
   const address = await registry.getAddress();
   console.log("VaultAccessRegistry deployed to:", address);

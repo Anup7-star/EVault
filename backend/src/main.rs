@@ -87,7 +87,11 @@ async fn main() -> anyhow::Result<()> {
     let _ = evault_backend::encryption::load_encryption_key();
 
     // 7. Blockchain contract client
-    info!("Initializing blockchain contract client...");
+    info!(
+        chain_id = siwe_expected_chain_id,
+        contract_address = %contract_address,
+        "Initializing blockchain contract client..."
+    );
     let contract_client = evault_backend::blockchain::contract_client::ContractClient::new(
         &rpc_url,
         &contract_address,
