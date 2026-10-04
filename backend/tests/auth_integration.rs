@@ -12,14 +12,23 @@ use evault_backend::api::auth::{
 
 async fn setup_app(pool: PgPool) -> (String, Client, PgPool) {
     let session_secret = "test_secret_for_jwt".to_string();
+    let expected_domain = "localhost:3000".to_string();
+    let expected_chain_id = 31337;
 
     let state = std::sync::Arc::new(evault_backend::api::auth::AuthState {
         pool: pool.clone(),
         session_secret: session_secret.clone(),
+        expected_domain: expected_domain.clone(),
+        expected_chain_id,
     });
 
     let app = Router::new()
-        .merge(auth_router(pool.clone(), session_secret.clone()))
+        .merge(auth_router(
+            pool.clone(),
+            session_secret.clone(),
+            expected_domain,
+            expected_chain_id,
+        ))
         .route(
             "/protected",
             get(|wallet: AuthenticatedWallet| async move { format!("Hello {}", wallet.0) })

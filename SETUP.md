@@ -73,11 +73,14 @@ cd ..
     node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
     ```
 *   `SESSION_SECRET`: Secret key for JWT sessions.
+*   `SIWE_EXPECTED_DOMAIN`: Expected SIWE domain (defaults to `localhost:3000` in dev).
+*   `SIWE_EXPECTED_CHAIN_ID`: Expected SIWE chain ID (defaults to `31337` in dev).
+*   `FRONTEND_ORIGIN`: Allowed CORS origin for the frontend (e.g., `http://localhost:3000`).
 *   `PORT`: Port for the backend HTTP server (defaults to `3001`).
 *   `RUST_LOG`: Log level for structured logging (defaults to `info`).
 
 > [!NOTE]
-> `SIWE_EXPECTED_DOMAIN` and `SIWE_EXPECTED_CHAIN_ID` are hardcoded in `backend/src/api/auth.rs` (`localhost:3000` and `31337`), so the app must be opened at exactly `http://localhost:3000` and MetaMask must be on chain `31337`.
+> For local development, `SIWE_EXPECTED_DOMAIN` is `localhost:3000` and `SIWE_EXPECTED_CHAIN_ID` is `31337` in `backend/.env`, so the app must be opened at `http://localhost:3000` and MetaMask must be on chain `31337`.
 
 ## 4. Start Order
 
@@ -219,7 +222,7 @@ Record the result and date next to each box before a demo.
 | **Grant fails with "gas limit is 21000000 and exceeds transaction gas cap of 16777216"** | The message is misleading. The real cause is that `grantAccess` reverted (gas estimation failed, so MetaMask used a huge default). Causes seen: expiry in the past; non-owner account ("Not vault owner"; grant and revoke are owner-only); vault does not exist on the current chain ("Vault does not exist", e.g. after a chain reset). The admin form now rejects an expiry less than 2 minutes in the future before MetaMask opens; keep this in mind as a note for anyone calling the contract or API directly. The Hardhat node terminal prints the real revert reason. |
 | **Grant or other call returns 400 with `%20` in the URL / "UUID parsing failed: found ` ` at 0"** | The Vault UUID field had leading or trailing whitespace. The form now trims whitespace, but keep this in mind as a note for anyone calling the API directly. |
 | **Port 3000 busy / Next.js shifts port** | If port 3000 is busy, Next.js moves to another port (e.g. 3002) and sign-in fails against the backend's hardcoded `localhost:3000` SIWE domain; port 3001 would also clash with the backend. Free port 3000 instead (`netstat -ano \| findstr :3000` and kill the process). |
-| **Sign-in rejected** | Check, in this order: the app is opened at `http://localhost:3000` (domain `localhost:3000` is hardcoded in `backend/src/api/auth.rs`); MetaMask is on Hardhat Local (chain `31337`, also hardcoded); `CONTRACT_ADDRESS` in `backend/.env` matches a contract that exists on the current node. These have caused most past auth bugs. |
+| **Sign-in rejected** | Check, in this order: the app is opened at `http://localhost:3000` (matches `SIWE_EXPECTED_DOMAIN` in `backend/.env`); MetaMask is on Hardhat Local (matches `SIWE_EXPECTED_CHAIN_ID` `31337` in `backend/.env`); `CONTRACT_ADDRESS` in `backend/.env` matches a contract that exists on the current node. These have caused most past auth bugs. |
 | **UI looks healthy but the backend is down** | It should not. The frontend must show an error when the backend or chain is unreachable. If it shows data anyway, something is serving fake data; see Team Guidelines. |
 
 ## 9. Team Guidelines

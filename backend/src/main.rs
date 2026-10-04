@@ -55,6 +55,13 @@ async fn main() -> anyhow::Result<()> {
 
     let session_secret = std::env::var("SESSION_SECRET").expect("SESSION_SECRET must be set");
 
+    let siwe_expected_domain =
+        std::env::var("SIWE_EXPECTED_DOMAIN").expect("SIWE_EXPECTED_DOMAIN must be set");
+    let siwe_expected_chain_id: u64 = std::env::var("SIWE_EXPECTED_CHAIN_ID")
+        .expect("SIWE_EXPECTED_CHAIN_ID must be set")
+        .parse()
+        .expect("SIWE_EXPECTED_CHAIN_ID must be a valid u64 chain ID");
+
     let frontend_origin = std::env::var("FRONTEND_ORIGIN").expect("FRONTEND_ORIGIN must be set");
     let frontend_origin_header: HeaderValue = frontend_origin
         .parse()
@@ -95,6 +102,8 @@ async fn main() -> anyhow::Result<()> {
         .merge(evault_backend::api::auth::router(
             pool.clone(),
             session_secret.clone(),
+            siwe_expected_domain,
+            siwe_expected_chain_id,
         ))
         .merge(evault_backend::api::vaults::router(
             pool.clone(),

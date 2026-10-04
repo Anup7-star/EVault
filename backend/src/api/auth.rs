@@ -22,6 +22,8 @@ use crate::auth::{
 pub struct AuthState {
     pub pool: PgPool,
     pub session_secret: String,
+    pub expected_domain: String,
+    pub expected_chain_id: u64,
 }
 
 #[derive(Deserialize)]
@@ -69,16 +71,12 @@ pub async fn verify_signature(
     State(state): State<Arc<AuthState>>,
     Json(payload): Json<VerifyRequest>,
 ) -> Result<Json<VerifyResponse>, AuthError> {
-    // TODO: Move to env/config for non-local deployment
-    let expected_domain = "localhost:3000";
-    let expected_chain_id = 31337;
-
     let verify_result = verify_siwe(
         &state.pool,
         &payload.message,
         &payload.signature,
-        expected_domain,
-        expected_chain_id,
+        &state.expected_domain,
+        state.expected_chain_id,
     )
     .await;
 
@@ -137,10 +135,17 @@ pub async fn verify_signature(
     }
 }
 
-pub fn router(pool: PgPool, session_secret: String) -> Router {
+pub fn router(
+    pool: PgPool,
+    session_secret: String,
+    expected_domain: String,
+    expected_chain_id: u64,
+) -> Router {
     let state = Arc::new(AuthState {
         pool,
         session_secret,
+        expected_domain,
+        expected_chain_id,
     });
 
     Router::new()

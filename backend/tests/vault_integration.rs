@@ -75,9 +75,16 @@ async fn deploy_contract() -> (
 /// Spin up the full app (auth + vault routers) against the given pool and contract client.
 async fn setup_app(pool: PgPool, contract: Arc<ContractClient>) -> (String, Client) {
     let session_secret = "test_vault_secret_key_1234567890".to_string();
+    let expected_domain = "localhost:3000".to_string();
+    let expected_chain_id = 31337;
 
     let app = Router::new()
-        .merge(auth_router(pool.clone(), session_secret.clone()))
+        .merge(auth_router(
+            pool.clone(),
+            session_secret.clone(),
+            expected_domain,
+            expected_chain_id,
+        ))
         .merge(vault_router(pool.clone(), contract, session_secret));
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
