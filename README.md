@@ -2,7 +2,7 @@
 
 EVault is a wallet-gated vault for sharing secrets with time-limited access. An admin creates a vault, the secret is encrypted before it is stored, and access is granted to a team member's wallet address with an expiry. The grant lives **on-chain**. Every time someone asks to reveal a secret, the backend verifies their signed-in wallet, re-reads the permission from the blockchain, and only then decrypts. If the grant is expired, revoked, or the chain is unreachable, the secret is not revealed.
 
-It runs entirely on your machine against a local Hardhat blockchain, so no testnet ETH is needed.
+It can run entirely on your machine against a local Hardhat blockchain (so no testnet ETH is needed), and is also deployed to the Arbitrum Sepolia testnet.
 
 Team: Tanmay, Anup, Ayaan.
 
@@ -86,11 +86,10 @@ Open http://localhost:3000. In MetaMask, add the network RPC `http://127.0.0.1:8
 
 ## Project status
 
-*   **Done and tested:** smart contract, Rust backend (SIWE, blockchain reads, encryption, vault and permissions API), frontend admin and user flows against the real backend.
+*   **Done and tested:** smart contract, Rust backend (SIWE, blockchain reads, encryption, vault and permissions API), frontend admin and user flows against the real backend, and deployment to Arbitrum Sepolia testnet.
 *   **Manual verification record:** see the checklist in SETUP.md (Section 7). Items 1 to 8 recorded as complete on 2026-10-04; items 9 to 11 pending.
 *   **Not implemented yet:**
     *   Activity/audit-log UI (the table is currently stubbed).
-    *   Sepolia or other public-testnet deployment.
     *   Key-loss recovery and access delegation (a research gap noted in the project plan).
     *   A security audit or static-analysis pass on the contract before any real deployment.
 *   **Known issues:** see SETUP.md (Sections 8 and 10).
