@@ -4,12 +4,10 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useAccount, useWriteContract, usePublicClient, useChainId, useSignMessage } from "wagmi";
 import { SiweMessage } from "siwe";
-import ConnectWallet from "@/components/ConnectWallet";
+import Navbar from "@/components/Navbar";
 import { useSession } from "@/components/SessionContext";
 import { apiClient } from "@/lib/apiClient";
 import { CONTRACT_ADDRESS, CONTRACT_ABI } from "@/lib/contract";
-
-// Deferred: Standalone error pages, responsive polish, dedicated transaction-status screen.
 
 function toDateTimeLocalString(date: Date): string {
   const pad = (n: number) => n.toString().padStart(2, "0");
@@ -80,14 +78,19 @@ export default function AdminDashboard() {
   const { token, setSession, clearSession } = useSession();
 
   const [authStatus, setAuthStatus] = useState("");
+  const [activeTab, setActiveTab] = useState<"create" | "grant" | "revoke" | "audit">("create");
 
+  // Create Vault Form State
   const [vaultName, setVaultName] = useState("");
   const [vaultDescription, setVaultDescription] = useState("");
   const [vaultStorageRef, setVaultStorageRef] = useState("s3://default-bucket/ref");
   const [vaultSecret, setVaultSecret] = useState("");
+  const [showSecret, setShowSecret] = useState(false);
   const [registerStatus, setRegisterStatus] = useState<string>("");
   const [lastVaultId, setLastVaultId] = useState<string>("");
+  const [copiedUuid, setCopiedUuid] = useState(false);
 
+  // Grant Form State
   const [grantVaultId, setGrantVaultId] = useState("");
   const [grantWallet, setGrantWallet] = useState("");
   const [grantExpiry, setGrantExpiry] = useState(() => {
@@ -95,14 +98,19 @@ export default function AdminDashboard() {
   });
   const [grantStatus, setGrantStatus] = useState<string>("");
 
+  // Revoke Form State
   const [revokeVaultId, setRevokeVaultId] = useState("");
   const [revokeWallet, setRevokeWallet] = useState("");
   const [revokeStatus, setRevokeStatus] = useState<string>("");
 
+  // Audit Logs & Permissions State
   const [permissions, setPermissions] = useState<any[]>([]);
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
   const [auditLogsStatus, setAuditLogsStatus] = useState<string>("");
   const [activeVaultId, setActiveVaultId] = useState<string>("");
+
+  // Recent vaults tracker in memory for quick selection
+  const [recentVaults, setRecentVaults] = useState<Array<{ id: string; name: string; blockchainId?: string }>>([]);
 
   const contractReady = CONTRACT_ADDRESS && CONTRACT_ADDRESS !== "0x0000000000000000000000000000000000000000";
 
@@ -117,7 +125,7 @@ export default function AdminDashboard() {
     }
   }, [isConnected, address, token]);
 
-  // Reset session-derived states when token becomes null (e.g. disconnect or account switch)
+  // Reset session-derived states when token becomes null
   useEffect(() => {
     if (!token) {
       setPermissions([]);
@@ -128,12 +136,13 @@ export default function AdminDashboard() {
       setRegisterStatus("");
       setGrantStatus("");
       setRevokeStatus("");
+      setRecentVaults([]);
     }
   }, [token]);
 
   async function handleSignIn() {
     if (!address) return;
-    setAuthStatus("Fetching secure nonce...");
+    setAuthStatus("Fetching secure nonce from Rust backend...");
     try {
       const { nonce } = await apiClient.getNonce(address);
 
@@ -152,9 +161,9 @@ export default function AdminDashboard() {
         message: message.prepareMessage(),
       });
 
-      setAuthStatus("Verifying signature...");
+      setAuthStatus("Verifying signature with Rust backend...");
       const verifyRes = await apiClient.verifySiwe(message.prepareMessage(), signature);
-      
+
       setSession(verifyRes.token, verifyRes.walletAddress);
       setAuthStatus("");
     } catch (err: any) {
@@ -174,31 +183,30 @@ export default function AdminDashboard() {
         args: [vaultName],
       });
       setRegisterStatus("Transaction sent! Waiting for blockchain confirmation...");
-      const receipt = await publicClient.waitForTransactionReceipt({ hash });
+      await publicClient.waitForTransactionReceipt({ hash });
 
-      // In a real app we'd parse the event logs from receipt.
-      // For this prototype, we'll fetch the count.
       const count = (await publicClient.readContract({
         address: CONTRACT_ADDRESS,
         abi: CONTRACT_ABI,
         functionName: "getVaultCount",
       })) as bigint;
       const blockchainVaultId = (count - 1n).toString();
-      
-      setRegisterStatus(`Blockchain confirmed Vault #${blockchainVaultId}. Syncing with backend...`);
+
+      setRegisterStatus(`Blockchain confirmed Vault #${blockchainVaultId}. Encrypting & syncing with backend...`);
 
       const res = await apiClient.createVault(token, {
         blockchainVaultId: Number(blockchainVaultId),
         name: vaultName,
         description: vaultDescription,
         storageReference: vaultStorageRef,
-        secret: vaultSecret
+        secret: vaultSecret,
       });
 
-      setLastVaultId(res.id); // UUID from backend
+      setLastVaultId(res.id);
       setGrantVaultId(res.id);
       setRevokeVaultId(res.id);
-      setRegisterStatus(`Success! Vault created on-chain (#${blockchainVaultId}) and secured in backend (UUID: ${res.id}).`);
+      setRecentVaults((prev) => [{ id: res.id, name: vaultName, blockchainId: blockchainVaultId }, ...prev]);
+      setRegisterStatus(`Success! Vault created on-chain (#${blockchainVaultId}) and encrypted in backend (UUID: ${res.id}).`);
       setVaultName("");
       setVaultDescription("");
       setVaultSecret("");
@@ -236,11 +244,8 @@ export default function AdminDashboard() {
     setGrantStatus("Submitting access permission to the blockchain...");
     try {
       const expiryTimestamp = BigInt(Math.floor(expiryMs / 1000));
-      
-      // Need the blockchain vault ID. We assume the user entered the UUID in grantVaultId.
-      // Fetch vault details to get the blockchain ID.
       const vault = await apiClient.getVault(token, trimmedVaultId);
-      
+
       const hash = await writeContractAsync({
         address: CONTRACT_ADDRESS,
         abi: CONTRACT_ABI,
@@ -250,16 +255,14 @@ export default function AdminDashboard() {
       setGrantStatus("Transaction sent! Confirming permission on-chain...");
       await publicClient.waitForTransactionReceipt({ hash });
 
-      setGrantStatus("On-chain grant confirmed! Syncing with backend...");
+      setGrantStatus("On-chain grant confirmed! Syncing with backend projection...");
       await apiClient.grantPermission(token, trimmedVaultId, {
-         walletAddress: trimmedWallet,
-         role: 2, // Hardcoded role 2 (viewer) for prototype
-         expiresAt: new Date(grantExpiry).toISOString()
+        walletAddress: trimmedWallet,
+        role: 2,
+        expiresAt: new Date(grantExpiry).toISOString(),
       });
 
       setGrantStatus(`Success! Granted access for Vault to ${trimmedWallet.slice(0, 6)}...${trimmedWallet.slice(-4)}.`);
-      
-      // Refresh permissions & activity logs
       loadVaultActivity(trimmedVaultId);
     } catch (err: any) {
       const errorMsg = err.shortMessage || err.message || "An unexpected issue occurred.";
@@ -300,16 +303,14 @@ export default function AdminDashboard() {
       setRevokeStatus("On-chain revoke confirmed! Syncing with backend...");
       await apiClient.revokePermission(token, trimmedVaultId, trimmedWallet);
 
-      setRevokeStatus(`Success! Access revoked.`);
-      
-      // Refresh permissions & activity logs
+      setRevokeStatus(`Success! Access revoked on-chain.`);
       loadVaultActivity(trimmedVaultId);
     } catch (err: any) {
       const errorMsg = err.shortMessage || err.message || "An unexpected issue occurred.";
       setRevokeStatus(`Revocation couldn't be completed: ${errorMsg}`);
     }
   }
-  
+
   async function loadVaultActivity(vaultId: string) {
     if (!token) return;
     const trimmed = vaultId.trim();
@@ -328,7 +329,7 @@ export default function AdminDashboard() {
       setPermissions([]);
     }
 
-    setAuditLogsStatus("Loading activity logs...");
+    setAuditLogsStatus("Loading activity logs from PostgreSQL...");
     try {
       const logs = await apiClient.getAuditLogs(token, trimmed);
       setAuditLogs(logs);
@@ -340,427 +341,695 @@ export default function AdminDashboard() {
     }
   }
 
+  function handleSelectRecentVault(id: string) {
+    setGrantVaultId(id);
+    setRevokeVaultId(id);
+    loadVaultActivity(id);
+  }
+
+  function copyLastUuid() {
+    if (!lastVaultId) return;
+    navigator.clipboard.writeText(lastVaultId);
+    setCopiedUuid(true);
+    setTimeout(() => setCopiedUuid(false), 2000);
+  }
+
   return (
-    <main className="mx-auto max-w-5xl px-4 py-8 sm:px-6 sm:py-12">
-      <header className="mb-8 flex flex-col gap-4 border-b border-warm-border pb-6 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <Link
-            href="/"
-            className="inline-flex items-center gap-1.5 text-xs font-semibold text-warm-muted hover:text-amber-400 transition-colors focus-visible:outline-none"
-          >
-            <span>←</span> Back to Home
-          </Link>
-          <h1 className="mt-1 text-2xl font-bold text-warm-text sm:text-3xl font-sans">
-            Admin Console
-          </h1>
-          <p className="text-xs text-warm-muted mt-0.5">
-            Create encrypted vaults and manage time-bound access for your team.
-          </p>
-        </div>
-        <ConnectWallet />
-      </header>
+    <div className="min-h-screen flex flex-col bg-vault-bg text-vault-text selection:bg-cyan-500/30 selection:text-cyan-200">
+      <Navbar />
 
-      {!isConnected && (
-        <div className="rounded-2xl border border-warm-border bg-warm-surface p-8 text-center shadow-md max-w-xl mx-auto my-8">
-          <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-amber-500/10 text-amber-400">
-            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-            </svg>
+      <main className="flex-1 mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 py-8 sm:py-10 space-y-8">
+        {/* Page Top Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-vault-border/80 pb-6">
+          <div>
+            <div className="flex items-center gap-2">
+              <Link
+                href="/"
+                className="text-xs font-semibold text-slate-400 hover:text-cyan-400 transition-colors"
+              >
+                ← Overview
+              </Link>
+              <span className="text-slate-600">/</span>
+              <span className="text-xs font-mono text-cyan-400 font-semibold">Admin Console</span>
+            </div>
+            <h1 className="mt-1.5 text-2xl sm:text-3xl font-extrabold text-white tracking-tight font-sans">
+              Vault Management &amp; Access Governance
+            </h1>
+            <p className="mt-1 text-xs sm:text-sm text-slate-400">
+              Create encrypted vaults, issue time-bound member permissions on-chain, and audit access events.
+            </p>
           </div>
-          <h2 className="text-lg font-bold text-warm-text">Wallet Connection Required</h2>
-          <p className="mt-1 text-sm text-warm-muted">
-            Please connect your admin wallet to create vaults and authorize member access.
-          </p>
-        </div>
-      )}
 
-      {isConnected && !token && authStatus && (
-        <div className="rounded-2xl border border-amber-800/40 bg-amber-950/20 p-5 text-sm text-amber-200/90 text-center mb-8">
-          <p className="animate-pulse">{authStatus}</p>
-          {authStatus.includes("failed") && (
-            <button onClick={handleSignIn} className="mt-4 rounded-xl border border-amber-500/50 px-4 py-2 hover:bg-amber-500/20">
-              Retry Sign-In
-            </button>
-          )}
+          {/* Quick Stats or Chain indicator */}
+          <div className="flex items-center gap-2 self-start sm:self-auto">
+            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-vault-border bg-vault-surface text-xs font-mono text-slate-300">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              <span>Chain ID {chainId || "---"}</span>
+            </span>
+          </div>
         </div>
-      )}
 
-      {isConnected && !contractReady && (
-        <div className="mb-8 rounded-2xl border border-amber-800/40 bg-amber-950/20 p-5 text-sm text-amber-200/90">
-          <div className="flex items-start gap-3">
+        {/* Wallet Disconnected Warning */}
+        {!isConnected && (
+          <div className="rounded-2xl border border-vault-border bg-vault-surface p-10 text-center shadow-xl max-w-xl mx-auto my-12 space-y-4">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/30">
+              <svg className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+              </svg>
+            </div>
+            <h2 className="text-xl font-bold text-white">Owner Wallet Connection Required</h2>
+            <p className="text-xs sm:text-sm text-slate-400 leading-relaxed max-w-md mx-auto">
+              Connect your authorized Web3 administrator wallet to deploy contracts, issue permission grants, and view activity logs.
+            </p>
+          </div>
+        )}
+
+        {/* Authenticating SIWE banner */}
+        {isConnected && !token && authStatus && (
+          <div className="rounded-2xl border border-cyan-500/30 bg-cyan-950/30 p-5 text-sm text-cyan-200 text-center space-y-3">
+            <p className="animate-pulse font-mono text-xs sm:text-sm">{authStatus}</p>
+            {authStatus.includes("failed") && (
+              <button
+                onClick={handleSignIn}
+                className="rounded-xl border border-cyan-500/50 bg-cyan-500/20 px-4 py-2 text-xs font-bold text-white hover:bg-cyan-500/30 transition-colors"
+              >
+                Retry Cryptographic Sign-In
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Smart Contract check warning */}
+        {isConnected && !contractReady && (
+          <div className="rounded-2xl border border-amber-500/40 bg-amber-950/20 p-5 text-xs text-amber-200/90 flex items-start gap-3">
             <span className="text-xl">⚠️</span>
-            <div>
-              <p className="font-bold text-amber-200">Smart Contract Connection Required</p>
-              <p className="mt-1 text-xs text-amber-300/80 leading-relaxed">
-                The vault registry smart contract hasn't been detected on your network. Please ensure your local Hardhat node is running and deploy the contract using <code className="rounded bg-amber-900/40 px-1.5 py-0.5 text-amber-200 font-mono">npm run deploy:local</code>.
+            <div className="space-y-1">
+              <p className="font-bold text-amber-200 text-sm">Smart Contract Not Configured</p>
+              <p className="text-slate-300 leading-relaxed">
+                The vault registry contract has not been detected at <code className="font-mono bg-black/40 px-1.5 py-0.5 rounded text-amber-300">{CONTRACT_ADDRESS}</code>. Run <code className="font-mono bg-black/40 px-1.5 py-0.5 rounded text-amber-300">npm run deploy:local</code> or configure Arbitrum Sepolia in your environment.
               </p>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {isConnected && token && contractReady && (
-        <div className="grid grid-cols-1 gap-8 lg:grid-cols-12">
-          {/* Action Cards Column */}
-          <div className="space-y-8 lg:col-span-7">
-            {/* Form 1: Create Vault */}
-            <section className="rounded-2xl border border-warm-border bg-warm-surface p-6 shadow-md">
-              <div className="mb-5">
-                <h2 className="text-lg font-bold text-warm-text flex items-center gap-2">
-                  <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-amber-500/10 text-amber-400 text-sm">
-                    🔒
-                  </span>
-                  Create New Vault
-                </h2>
-                <p className="mt-1 text-xs text-warm-muted leading-relaxed">
-                  Store a new secret securely. The metadata is recorded on-chain, and your secret content is encrypted before storage.
-                </p>
-              </div>
-
-              <form onSubmit={handleRegisterVault} className="space-y-4">
-                <div>
-                  <label className="block text-xs font-bold text-warm-text mb-1.5">
-                    Vault Name
-                  </label>
-                  <input
-                    className="w-full rounded-xl border border-warm-border bg-warm-card px-4 py-2.5 text-sm text-warm-text placeholder-warm-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
-                    placeholder="e.g. Production Database Credentials"
-                    value={vaultName}
-                    onChange={(e) => setVaultName(e.target.value)}
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-warm-text mb-1.5">
-                    Description (Optional)
-                  </label>
-                  <input
-                    className="w-full rounded-xl border border-warm-border bg-warm-card px-4 py-2.5 text-sm text-warm-text placeholder-warm-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
-                    placeholder="Short description"
-                    value={vaultDescription}
-                    onChange={(e) => setVaultDescription(e.target.value)}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-warm-text mb-1.5">
-                    Secret Content to Encrypt
-                  </label>
-                  <textarea
-                    className="w-full rounded-xl border border-warm-border bg-warm-card px-4 py-2.5 text-sm text-warm-text placeholder-warm-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60 font-mono"
-                    placeholder="Paste confidential keys, passwords, or secret notes here..."
-                    value={vaultSecret}
-                    onChange={(e) => setVaultSecret(e.target.value)}
-                    rows={3}
-                    required
-                  />
-                </div>
-
-                <button
-                  type="submit"
-                  className="w-full rounded-xl bg-warm-accent px-4 py-3 text-xs font-bold text-stone-950 hover:bg-amber-500 active:scale-[0.99] transition-all shadow-md shadow-amber-950/20 focus-visible:outline-none"
-                >
-                  Create &amp; Protect Vault
-                </button>
-
-                {registerStatus && (
-                  <div
-                    className={`rounded-xl p-3 text-xs leading-relaxed border font-mono ${
-                      registerStatus.includes("Error") || registerStatus.includes("couldn't") || registerStatus.includes("failed")
-                        ? "bg-rose-950/30 border-rose-800/40 text-rose-300"
-                        : registerStatus.includes("Success")
-                        ? "bg-emerald-950/30 border-emerald-800/40 text-emerald-300"
-                        : "bg-warm-card border-warm-border text-warm-muted"
+        {/* Main Dashboard Area */}
+        {isConnected && token && contractReady && (
+          <div className="space-y-6">
+            {/* Quick Vault Selector Strip if any vaults created in this session */}
+            {recentVaults.length > 0 && (
+              <div className="flex items-center gap-2 overflow-x-auto p-3 rounded-xl border border-vault-border bg-vault-surface/60 text-xs">
+                <span className="font-semibold text-slate-400 whitespace-nowrap">Recent Vaults:</span>
+                {recentVaults.map((rv) => (
+                  <button
+                    key={rv.id}
+                    onClick={() => handleSelectRecentVault(rv.id)}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg border font-mono transition-all whitespace-nowrap ${
+                      activeVaultId === rv.id
+                        ? "border-cyan-500 bg-cyan-500/15 text-cyan-300 font-bold"
+                        : "border-vault-border bg-vault-card text-slate-300 hover:border-slate-600"
                     }`}
                   >
-                    {registerStatus}
-                  </div>
-                )}
+                    <span>🔒 {rv.name}</span>
+                    <span className="text-[10px] text-slate-500">({rv.id.slice(0, 6)}...)</span>
+                  </button>
+                ))}
+              </div>
+            )}
 
-                {lastVaultId && (
-                  <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 p-3 text-xs text-amber-200 break-all">
-                    💡 <strong className="font-bold">Vault Created!</strong> Your newly generated Vault UUID is <span className="font-mono font-bold underline text-white">{lastVaultId}</span>. Use this ID to grant member access below.
-                  </div>
-                )}
-              </form>
-            </section>
-
-            {/* Form 2: Grant Access */}
-            <section className="rounded-2xl border border-warm-border bg-warm-surface p-6 shadow-md">
-              <div className="mb-5">
-                <h2 className="text-lg font-bold text-warm-text flex items-center gap-2">
-                  <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-amber-500/10 text-amber-400 text-sm">
-                    🤝
+            {/* Dashboard Tabs Header */}
+            <div className="flex border-b border-vault-border/80 gap-2">
+              <button
+                onClick={() => setActiveTab("create")}
+                className={`flex items-center gap-2 px-4 py-3 text-xs sm:text-sm font-bold border-b-2 transition-all ${
+                  activeTab === "create"
+                    ? "border-cyan-400 text-cyan-400"
+                    : "border-transparent text-slate-400 hover:text-white"
+                }`}
+              >
+                <span>🔒</span>
+                <span>Create Vault</span>
+              </button>
+              <button
+                onClick={() => setActiveTab("grant")}
+                className={`flex items-center gap-2 px-4 py-3 text-xs sm:text-sm font-bold border-b-2 transition-all ${
+                  activeTab === "grant"
+                    ? "border-emerald-400 text-emerald-400"
+                    : "border-transparent text-slate-400 hover:text-white"
+                }`}
+              >
+                <span>🤝</span>
+                <span>Grant Access</span>
+              </button>
+              <button
+                onClick={() => setActiveTab("revoke")}
+                className={`flex items-center gap-2 px-4 py-3 text-xs sm:text-sm font-bold border-b-2 transition-all ${
+                  activeTab === "revoke"
+                    ? "border-rose-400 text-rose-400"
+                    : "border-transparent text-slate-400 hover:text-white"
+                }`}
+              >
+                <span>🚫</span>
+                <span>Revoke Access</span>
+              </button>
+              <button
+                onClick={() => setActiveTab("audit")}
+                className={`flex items-center gap-2 px-4 py-3 text-xs sm:text-sm font-bold border-b-2 transition-all ${
+                  activeTab === "audit"
+                    ? "border-purple-400 text-purple-400"
+                    : "border-transparent text-slate-400 hover:text-white"
+                }`}
+              >
+                <span>📜</span>
+                <span>Audit Trail &amp; Permissions</span>
+                {auditLogs.length > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-purple-500/20 text-purple-300 font-mono">
+                    {auditLogs.length}
                   </span>
-                  Grant Member Access
-                </h2>
-                <p className="mt-1 text-xs text-warm-muted leading-relaxed">
-                  Give a team member temporary, blockchain-verified access to view a specific vault's secret.
-                </p>
-              </div>
-
-              <form onSubmit={handleGrantAccess} className="space-y-4">
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <div>
-                    <label className="block text-xs font-bold text-warm-text mb-1.5">
-                      Vault UUID
-                    </label>
-                    <input
-                      className="w-full rounded-xl border border-warm-border bg-warm-card px-4 py-2.5 text-sm text-warm-text placeholder-warm-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60 font-mono"
-                      placeholder="e.g. 123e4567..."
-                      value={grantVaultId}
-                      onChange={(e) => {
-                        setGrantVaultId(e.target.value);
-                        if (e.target.value.trim().length >= 32) loadVaultActivity(e.target.value);
-                      }}
-                      required
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-warm-text mb-1.5">
-                      Access Expiration Date &amp; Time
-                    </label>
-                    <input
-                      type="datetime-local"
-                      min={toDateTimeLocalString(new Date())}
-                      className="w-full rounded-xl border border-warm-border bg-warm-card px-4 py-2.5 text-sm text-warm-text outline-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
-                      value={grantExpiry}
-                      onChange={(e) => setGrantExpiry(e.target.value)}
-                      required
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-warm-text mb-1.5">
-                    Team Member Wallet Address
-                  </label>
-                  <input
-                    className="w-full rounded-xl border border-warm-border bg-warm-card px-4 py-2.5 text-sm text-warm-text placeholder-warm-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60 font-mono"
-                    placeholder="0x..."
-                    value={grantWallet}
-                    onChange={(e) => setGrantWallet(e.target.value)}
-                    required
-                  />
-                </div>
-
-                <button
-                  type="submit"
-                  className="w-full rounded-xl bg-warm-accent px-4 py-3 text-xs font-bold text-stone-950 hover:bg-amber-500 active:scale-[0.99] transition-all shadow-md shadow-amber-950/20 focus-visible:outline-none"
-                >
-                  Confirm &amp; Grant Access
-                </button>
-
-                {grantStatus && (
-                  <div
-                    className={`rounded-xl p-3 text-xs leading-relaxed border font-mono ${
-                      grantStatus.includes("Error") || grantStatus.includes("couldn't") || grantStatus.includes("Expiry must")
-                        ? "bg-rose-950/30 border-rose-800/40 text-rose-300"
-                        : grantStatus.includes("Success")
-                        ? "bg-emerald-950/30 border-emerald-800/40 text-emerald-300"
-                        : "bg-warm-card border-warm-border text-warm-muted"
-                    }`}
-                  >
-                    {grantStatus}
-                  </div>
                 )}
-              </form>
-            </section>
+              </button>
+            </div>
 
-            {/* Form 3: Revoke Access */}
-            <section className="rounded-2xl border border-warm-border bg-warm-surface p-6 shadow-md">
-              <div className="mb-5">
-                <h2 className="text-lg font-bold text-warm-text flex items-center gap-2">
-                  <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-rose-500/10 text-rose-400 text-sm">
-                    🚫
-                  </span>
-                  Revoke Member Access
-                </h2>
-                <p className="mt-1 text-xs text-warm-muted leading-relaxed">
-                  Immediately cancel a member's on-chain permission to view a specific vault before its expiry time.
-                </p>
-              </div>
-
-              <form onSubmit={handleRevokeAccess} className="space-y-4">
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            {/* Tab 1: Create Vault */}
+            {activeTab === "create" && (
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+                <section className="lg:col-span-8 rounded-2xl border border-vault-border bg-vault-card p-6 sm:p-8 shadow-xl space-y-6">
                   <div>
-                    <label className="block text-xs font-bold text-warm-text mb-1.5">
-                      Vault UUID
-                    </label>
-                    <input
-                      className="w-full rounded-xl border border-warm-border bg-warm-card px-4 py-2.5 text-sm text-warm-text placeholder-warm-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500/60 font-mono"
-                      placeholder="e.g. 123e4567..."
-                      value={revokeVaultId}
-                      onChange={(e) => {
-                        setRevokeVaultId(e.target.value);
-                        if (e.target.value.trim().length >= 32) loadVaultActivity(e.target.value);
-                      }}
-                      required
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-warm-text mb-1.5">
-                      Team Member Wallet Address
-                    </label>
-                    <input
-                      className="w-full rounded-xl border border-warm-border bg-warm-card px-4 py-2.5 text-sm text-warm-text placeholder-warm-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500/60 font-mono"
-                      placeholder="0x..."
-                      value={revokeWallet}
-                      onChange={(e) => setRevokeWallet(e.target.value)}
-                      required
-                    />
-                  </div>
-                </div>
-
-                <button
-                  type="submit"
-                  className="w-full rounded-xl bg-rose-700 hover:bg-rose-600 px-4 py-3 text-xs font-bold text-white active:scale-[0.99] transition-all shadow-md shadow-rose-950/20 focus-visible:outline-none"
-                >
-                  Revoke Access On-Chain
-                </button>
-
-                {revokeStatus && (
-                  <div
-                    className={`rounded-xl p-3 text-xs leading-relaxed border font-mono ${
-                      revokeStatus.includes("Error") || revokeStatus.includes("couldn't")
-                        ? "bg-rose-950/30 border-rose-800/40 text-rose-300"
-                        : revokeStatus.includes("Success")
-                        ? "bg-emerald-950/30 border-emerald-800/40 text-emerald-300"
-                        : "bg-warm-card border-warm-border text-warm-muted"
-                    }`}
-                  >
-                    {revokeStatus}
-                  </div>
-                )}
-              </form>
-            </section>
-          </div>
-
-          {/* Audit Log / Permissions Column */}
-          <div className="lg:col-span-5 space-y-8">
-            {/* Permissions Section */}
-            <section className="rounded-2xl border border-warm-border bg-warm-surface p-6 shadow-md flex flex-col">
-              <div className="mb-4">
-                <h2 className="text-lg font-bold text-warm-text flex items-center gap-2">
-                  <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-amber-500/10 text-amber-400 text-sm">
-                    👥
-                  </span>
-                  Current Permissions
-                </h2>
-                <p className="text-[11px] text-warm-muted">
-                  {activeVaultId ? `Active permissions for ${activeVaultId.slice(0, 8)}...` : "Select or enter a Vault UUID above to view permissions"}
-                </p>
-              </div>
-              <div className="flex-1 overflow-y-auto space-y-3 pr-1 text-xs max-h-48">
-                {!activeVaultId ? (
-                  <div className="text-warm-muted text-center italic p-4">No vault selected yet.</div>
-                ) : permissions.length === 0 ? (
-                  <div className="text-warm-muted text-center italic p-4">No active permissions found for this vault.</div>
-                ) : (
-                  permissions.map((p, idx) => (
-                    <div key={idx} className="rounded-xl border border-warm-border p-3 text-warm-text bg-warm-card">
-                      <p><strong>Wallet:</strong> <span className="font-mono">{p.walletAddress?.slice(0, 10) ?? "Unknown"}...</span></p>
-                      <p><strong>Status:</strong> {p.active ? "ACTIVE" : "REVOKED"}</p>
-                      <p><strong>Expires:</strong> {new Date(p.expiresAt).toLocaleString()}</p>
-                    </div>
-                  ))
-                )}
-              </div>
-            </section>
-
-            {/* Activity Log Section */}
-            <section className="rounded-2xl border border-warm-border bg-warm-surface p-6 shadow-md flex flex-col">
-              <div className="mb-4 flex items-center justify-between">
-                <div>
-                  <h2 className="text-lg font-bold text-warm-text flex items-center gap-2">
-                    <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-amber-500/10 text-amber-400 text-sm">
-                      📜
-                    </span>
-                    Activity Log
-                  </h2>
-                  <p className="text-[11px] text-warm-muted">
-                    {activeVaultId ? `Audit history for ${activeVaultId.slice(0, 8)}...` : "Recent security and access events"}
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex-1 max-h-[480px] overflow-y-auto space-y-3 pr-1 text-xs">
-                {auditLogsStatus && auditLogs.length === 0 ? (
-                  <div className="rounded-xl border border-rose-800/40 bg-rose-950/20 p-4 text-center text-rose-300">
-                    {auditLogsStatus}
-                  </div>
-                ) : !activeVaultId ? (
-                  <div className="flex flex-col items-center justify-center h-48 text-center p-6 border border-dashed border-warm-border rounded-xl">
-                    <span className="text-2xl mb-2">📋</span>
-                    <p className="text-warm-muted font-medium text-xs">Select or enter a Vault UUID to view activity logs</p>
-                  </div>
-                ) : auditLogs.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center h-48 text-center p-6 border border-dashed border-warm-border rounded-xl">
-                    <span className="text-2xl mb-2">📋</span>
-                    <p className="text-warm-muted font-medium text-xs">No activity yet</p>
-                    <p className="text-[11px] text-warm-muted/70 mt-1 max-w-xs">
-                      Security events (vault creation, grants, reveals, revokes) will be recorded here automatically.
+                    <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                      <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-cyan-500/10 text-cyan-400 text-base">
+                        🔒
+                      </span>
+                      Create &amp; Encrypt New Vault
+                    </h2>
+                    <p className="mt-1 text-xs text-slate-400 leading-relaxed">
+                      Metadata is registered immutably on-chain via Solidity smart contract. The secret payload is encrypted with unique 96-bit nonces using AES-256-GCM.
                     </p>
                   </div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse">
-                      <thead>
-                        <tr className="border-b border-warm-border text-[11px] text-warm-muted uppercase tracking-wider">
-                          <th className="py-2.5 px-2 font-semibold">Time</th>
-                          <th className="py-2.5 px-2 font-semibold">Action</th>
-                          <th className="py-2.5 px-2 font-semibold">Wallet</th>
-                          <th className="py-2.5 px-2 font-semibold">Details</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-warm-border/50">
-                        {auditLogs.map((log) => {
-                          const metaStr = formatMetadata(log.metadata);
-                          const actionLabel = mapAuditAction(log.action);
-                          return (
-                            <tr key={log.id} className="hover:bg-warm-card/50 transition-colors">
-                              <td className="py-2 px-2 text-warm-muted text-[11px] whitespace-nowrap">
-                                {new Date(log.timestamp).toLocaleString()}
-                              </td>
-                              <td className="py-2 px-2 whitespace-nowrap">
-                                <span
-                                  className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                                    log.action === "VAULT_CREATED"
-                                      ? "bg-amber-500/10 text-amber-300 border border-amber-500/20"
-                                      : log.action === "ACCESS_GRANTED"
-                                      ? "bg-emerald-500/10 text-emerald-300 border border-emerald-500/20"
-                                      : log.action === "SECRET_RETRIEVED"
-                                      ? "bg-blue-500/10 text-blue-300 border border-blue-500/20"
-                                      : log.action === "ACCESS_REVOKED"
-                                      ? "bg-rose-500/10 text-rose-300 border border-rose-500/20"
-                                      : "bg-stone-800 text-stone-300"
-                                  }`}
-                                >
-                                  {actionLabel}
-                                </span>
-                              </td>
-                              <td className="py-2 px-2 font-mono text-warm-text text-[11px] whitespace-nowrap">
-                                {log.walletAddress
-                                  ? `${log.walletAddress.slice(0, 6)}...${log.walletAddress.slice(-4)}`
-                                  : "—"}
-                              </td>
-                              <td className="py-2 px-2 text-[11px] text-warm-muted">
-                                {metaStr || "—"}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
+
+                  <form onSubmit={handleRegisterVault} className="space-y-5">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-200 mb-1.5 uppercase tracking-wider font-mono">
+                        Vault Name
+                      </label>
+                      <input
+                        className="w-full rounded-xl border border-vault-border bg-vault-surface px-4 py-3 text-sm text-white placeholder-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500/60 transition-all"
+                        placeholder="e.g. Production Cluster Credentials"
+                        value={vaultName}
+                        onChange={(e) => setVaultName(e.target.value)}
+                        required
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-200 mb-1.5 uppercase tracking-wider font-mono">
+                        Description (Optional)
+                      </label>
+                      <input
+                        className="w-full rounded-xl border border-vault-border bg-vault-surface px-4 py-3 text-sm text-white placeholder-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500/60 transition-all"
+                        placeholder="Short summary of this confidential credential"
+                        value={vaultDescription}
+                        onChange={(e) => setVaultDescription(e.target.value)}
+                      />
+                    </div>
+
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="block text-xs font-bold text-slate-200 uppercase tracking-wider font-mono">
+                          Confidential Secret Content
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setShowSecret(!showSecret)}
+                          className="text-xs text-cyan-400 hover:text-cyan-300 font-mono"
+                        >
+                          {showSecret ? "Mask Secret" : "Reveal Input"}
+                        </button>
+                      </div>
+                      <textarea
+                        className="w-full rounded-xl border border-vault-border bg-vault-surface px-4 py-3 text-sm text-white placeholder-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500/60 font-mono transition-all"
+                        placeholder="Paste private key, API token, or secret password..."
+                        value={vaultSecret}
+                        onChange={(e) => setVaultSecret(e.target.value)}
+                        rows={4}
+                        required
+                        style={{ WebkitTextSecurity: showSecret ? "none" : "disc" } as any}
+                      />
+                      <span className="text-[11px] text-slate-500 mt-1 block">
+                        Hardware-encrypted with AES-256-GCM before database write.
+                      </span>
+                    </div>
+
+                    <button
+                      type="submit"
+                      className="w-full rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 px-6 py-3.5 text-xs sm:text-sm font-bold text-white hover:from-cyan-400 hover:to-blue-500 transition-all shadow-lg shadow-cyan-500/20 active:scale-[0.99] focus-visible:outline-none"
+                    >
+                      Deploy On-Chain &amp; Secure Vault
+                    </button>
+
+                    {registerStatus && (
+                      <div
+                        className={`rounded-xl p-3.5 text-xs font-mono border leading-relaxed ${
+                          registerStatus.includes("Error") || registerStatus.includes("couldn't")
+                            ? "bg-rose-950/30 border-rose-800/40 text-rose-300"
+                            : registerStatus.includes("Success")
+                            ? "bg-emerald-950/30 border-emerald-800/40 text-emerald-300"
+                            : "bg-vault-surface border-vault-border text-slate-300"
+                        }`}
+                      >
+                        {registerStatus}
+                      </div>
+                    )}
+
+                    {lastVaultId && (
+                      <div className="rounded-xl border border-cyan-500/30 bg-cyan-950/20 p-4 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-cyan-300 flex items-center gap-1.5">
+                            <span>✨</span> Vault Created Successfully!
+                          </span>
+                          <button
+                            type="button"
+                            onClick={copyLastUuid}
+                            className="text-xs font-bold text-cyan-400 hover:text-cyan-200"
+                          >
+                            {copiedUuid ? "Copied!" : "Copy UUID"}
+                          </button>
+                        </div>
+                        <p className="font-mono text-xs text-white bg-black/40 p-2.5 rounded border border-cyan-500/20 break-all select-all">
+                          {lastVaultId}
+                        </p>
+                        <div className="flex gap-2 pt-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setActiveTab("grant");
+                              setGrantVaultId(lastVaultId);
+                            }}
+                            className="text-xs font-bold text-emerald-400 hover:underline"
+                          >
+                            Grant Member Access Now →
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </form>
+                </section>
+
+                {/* Right info column */}
+                <div className="lg:col-span-4 space-y-5 text-xs">
+                  <div className="rounded-2xl border border-vault-border bg-vault-surface p-6 space-y-3">
+                    <h3 className="font-bold text-white text-sm flex items-center gap-2">
+                      <span>💡</span> Owner Self-Grant Notice
+                    </h3>
+                    <p className="text-slate-400 leading-relaxed">
+                      By design, EVault enforces strict zero-trust: even the vault creator cannot decrypt secret content without an explicit on-chain grant.
+                    </p>
+                    <p className="text-slate-400 leading-relaxed">
+                      To decrypt your own vault later, remember to grant your own wallet address via the Grant Access tab.
+                    </p>
                   </div>
-                )}
+
+                  <div className="rounded-2xl border border-vault-border bg-vault-surface p-6 space-y-3">
+                    <h3 className="font-bold text-white text-sm flex items-center gap-2">
+                      <span>🛡️</span> Cryptographic Lifecycle
+                    </h3>
+                    <div className="space-y-2 text-slate-400">
+                      <div className="flex items-start gap-2">
+                        <span className="text-cyan-400 font-bold">1.</span>
+                        <span>Solidity smart contract assigns unique sequential on-chain vault ID.</span>
+                      </div>
+                      <div className="flex items-start gap-2">
+                        <span className="text-cyan-400 font-bold">2.</span>
+                        <span>Backend generates 96-bit CSPRNG nonce and computes AES-256-GCM ciphertext.</span>
+                      </div>
+                      <div className="flex items-start gap-2">
+                        <span className="text-cyan-400 font-bold">3.</span>
+                        <span>Encrypted payload is stored in PostgreSQL and linked with blockchain ID.</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
-            </section>
+            )}
+
+            {/* Tab 2: Grant Access */}
+            {activeTab === "grant" && (
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+                <section className="lg:col-span-8 rounded-2xl border border-vault-border bg-vault-card p-6 sm:p-8 shadow-xl space-y-6">
+                  <div>
+                    <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                      <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-400 text-base">
+                        🤝
+                      </span>
+                      Grant Member Access On-Chain
+                    </h2>
+                    <p className="mt-1 text-xs text-slate-400 leading-relaxed">
+                      Issue a time-bound cryptographic permission to a team member's Web3 wallet address. After the expiry timestamp, access automatically fails closed.
+                    </p>
+                  </div>
+
+                  <form onSubmit={handleGrantAccess} className="space-y-5">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-200 mb-1.5 uppercase tracking-wider font-mono">
+                          Vault UUID
+                        </label>
+                        <input
+                          className="w-full rounded-xl border border-vault-border bg-vault-surface px-4 py-3 text-sm text-white placeholder-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/60 font-mono transition-all"
+                          placeholder="e.g. 123e4567-e89b..."
+                          value={grantVaultId}
+                          onChange={(e) => {
+                            setGrantVaultId(e.target.value);
+                            if (e.target.value.trim().length >= 32) loadVaultActivity(e.target.value);
+                          }}
+                          required
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-slate-200 mb-1.5 uppercase tracking-wider font-mono">
+                          Access Expiration
+                        </label>
+                        <input
+                          type="datetime-local"
+                          min={toDateTimeLocalString(new Date())}
+                          className="w-full rounded-xl border border-vault-border bg-vault-surface px-4 py-3 text-sm text-white outline-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/60 transition-all"
+                          value={grantExpiry}
+                          onChange={(e) => setGrantExpiry(e.target.value)}
+                          required
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="block text-xs font-bold text-slate-200 uppercase tracking-wider font-mono">
+                          Grantee Wallet Address
+                        </label>
+                        {address && (
+                          <button
+                            type="button"
+                            onClick={() => setGrantWallet(address)}
+                            className="text-xs text-emerald-400 hover:text-emerald-300 font-mono"
+                          >
+                            Use My Own Address (Self-Grant)
+                          </button>
+                        )}
+                      </div>
+                      <input
+                        className="w-full rounded-xl border border-vault-border bg-vault-surface px-4 py-3 text-sm text-white placeholder-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/60 font-mono transition-all"
+                        placeholder="0x..."
+                        value={grantWallet}
+                        onChange={(e) => setGrantWallet(e.target.value)}
+                        required
+                      />
+                    </div>
+
+                    <button
+                      type="submit"
+                      className="w-full rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 px-6 py-3.5 text-xs sm:text-sm font-bold text-white hover:from-emerald-500 hover:to-teal-500 transition-all shadow-lg shadow-emerald-500/20 active:scale-[0.99] focus-visible:outline-none"
+                    >
+                      Authorize &amp; Commit Grant to Chain
+                    </button>
+
+                    {grantStatus && (
+                      <div
+                        className={`rounded-xl p-3.5 text-xs font-mono border leading-relaxed ${
+                          grantStatus.includes("Error") || grantStatus.includes("couldn't") || grantStatus.includes("Expiry must")
+                            ? "bg-rose-950/30 border-rose-800/40 text-rose-300"
+                            : grantStatus.includes("Success")
+                            ? "bg-emerald-950/30 border-emerald-800/40 text-emerald-300"
+                            : "bg-vault-surface border-vault-border text-slate-300"
+                        }`}
+                      >
+                        {grantStatus}
+                      </div>
+                    )}
+                  </form>
+                </section>
+
+                <div className="lg:col-span-4 space-y-4">
+                  <div className="rounded-2xl border border-vault-border bg-vault-surface p-6 text-xs space-y-3">
+                    <h3 className="font-bold text-white text-sm">Rules &amp; Verification</h3>
+                    <ul className="space-y-2 text-slate-400 list-disc list-inside">
+                      <li>Minimum expiry requirement: at least 2 minutes in the future.</li>
+                      <li>Role is set to Viewer (2) by smart contract default.</li>
+                      <li>Transaction gas is sponsored on Hardhat or testnet Arbitrum Sepolia.</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Tab 3: Revoke Access */}
+            {activeTab === "revoke" && (
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+                <section className="lg:col-span-8 rounded-2xl border border-vault-border bg-vault-card p-6 sm:p-8 shadow-xl space-y-6">
+                  <div>
+                    <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                      <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-rose-500/10 text-rose-400 text-base">
+                        🚫
+                      </span>
+                      Immediate On-Chain Revocation
+                    </h2>
+                    <p className="mt-1 text-xs text-slate-400 leading-relaxed">
+                      Instantly invalidate a member's viewing permission on the smart contract before their scheduled expiry. Subsequent reveal requests will fail closed with 403.
+                    </p>
+                  </div>
+
+                  <form onSubmit={handleRevokeAccess} className="space-y-5">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-200 mb-1.5 uppercase tracking-wider font-mono">
+                          Vault UUID
+                        </label>
+                        <input
+                          className="w-full rounded-xl border border-vault-border bg-vault-surface px-4 py-3 text-sm text-white placeholder-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500/60 font-mono transition-all"
+                          placeholder="e.g. 123e4567-e89b..."
+                          value={revokeVaultId}
+                          onChange={(e) => {
+                            setRevokeVaultId(e.target.value);
+                            if (e.target.value.trim().length >= 32) loadVaultActivity(e.target.value);
+                          }}
+                          required
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-slate-200 mb-1.5 uppercase tracking-wider font-mono">
+                          Team Member Wallet Address
+                        </label>
+                        <input
+                          className="w-full rounded-xl border border-vault-border bg-vault-surface px-4 py-3 text-sm text-white placeholder-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500/60 font-mono transition-all"
+                          placeholder="0x..."
+                          value={revokeWallet}
+                          onChange={(e) => setRevokeWallet(e.target.value)}
+                          required
+                        />
+                      </div>
+                    </div>
+
+                    <button
+                      type="submit"
+                      className="w-full rounded-xl bg-gradient-to-r from-rose-600 to-red-700 px-6 py-3.5 text-xs sm:text-sm font-bold text-white hover:from-rose-500 hover:to-red-600 transition-all shadow-lg shadow-rose-900/20 active:scale-[0.99] focus-visible:outline-none"
+                    >
+                      Revoke Permission On-Chain
+                    </button>
+
+                    {revokeStatus && (
+                      <div
+                        className={`rounded-xl p-3.5 text-xs font-mono border leading-relaxed ${
+                          revokeStatus.includes("Error") || revokeStatus.includes("couldn't")
+                            ? "bg-rose-950/30 border-rose-800/40 text-rose-300"
+                            : revokeStatus.includes("Success")
+                            ? "bg-emerald-950/30 border-emerald-800/40 text-emerald-300"
+                            : "bg-vault-surface border-vault-border text-slate-300"
+                        }`}
+                      >
+                        {revokeStatus}
+                      </div>
+                    )}
+                  </form>
+                </section>
+              </div>
+            )}
+
+            {/* Tab 4: Audit Trail & Permissions */}
+            {activeTab === "audit" && (
+              <div className="space-y-6">
+                {/* Vault UUID selector banner */}
+                <div className="rounded-2xl border border-vault-border bg-vault-card p-5 shadow-md flex flex-col sm:flex-row items-center justify-between gap-4">
+                  <div className="flex-1 w-full">
+                    <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider font-mono mb-1.5">
+                      Query Activity For Vault UUID
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        className="w-full rounded-xl border border-vault-border bg-vault-surface px-4 py-2.5 text-xs sm:text-sm text-white placeholder-slate-500 font-mono focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500"
+                        placeholder="Paste Vault UUID to inspect live logs..."
+                        value={activeVaultId}
+                        onChange={(e) => {
+                          setActiveVaultId(e.target.value);
+                          if (e.target.value.trim().length >= 32) loadVaultActivity(e.target.value);
+                        }}
+                      />
+                      <button
+                        onClick={() => loadVaultActivity(activeVaultId)}
+                        className="rounded-xl border border-vault-border bg-vault-surface px-4 py-2.5 text-xs font-bold text-slate-300 hover:border-cyan-500 hover:text-cyan-400 whitespace-nowrap"
+                      >
+                        Refresh Logs
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+                  {/* Current Active Permissions Column */}
+                  <div className="lg:col-span-5 rounded-2xl border border-vault-border bg-vault-card p-6 shadow-md flex flex-col">
+                    <div className="mb-4">
+                      <h2 className="text-base font-bold text-white flex items-center gap-2">
+                        <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-400 text-sm">
+                          👥
+                        </span>
+                        Active Permissions
+                      </h2>
+                      <p className="text-[11px] text-slate-400">
+                        {activeVaultId
+                          ? `Granted wallets for ${activeVaultId.slice(0, 8)}...`
+                          : "Enter a Vault UUID to view permissions projection"}
+                      </p>
+                    </div>
+
+                    <div className="flex-1 overflow-y-auto space-y-3 max-h-96 pr-1 text-xs">
+                      {!activeVaultId ? (
+                        <div className="text-slate-500 text-center italic p-8 border border-dashed border-vault-border rounded-xl">
+                          No vault selected. Enter a Vault UUID above.
+                        </div>
+                      ) : permissions.length === 0 ? (
+                        <div className="text-slate-500 text-center italic p-8 border border-dashed border-vault-border rounded-xl">
+                          No active permissions found for this vault.
+                        </div>
+                      ) : (
+                        permissions.map((p, idx) => (
+                          <div
+                            key={idx}
+                            className="rounded-xl border border-vault-border p-3.5 bg-vault-surface text-slate-300 space-y-1.5"
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="font-mono text-cyan-300 font-semibold">
+                                {p.walletAddress ? `${p.walletAddress.slice(0, 8)}...${p.walletAddress.slice(-6)}` : "Unknown"}
+                              </span>
+                              <span
+                                className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${
+                                  p.active
+                                    ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30"
+                                    : "bg-rose-500/15 text-rose-400 border border-rose-500/30"
+                                }`}
+                              >
+                                {p.active ? "ACTIVE" : "REVOKED"}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-slate-400">
+                              Expires: {new Date(p.expiresAt).toLocaleString()}
+                            </p>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Audit Logs Column */}
+                  <div className="lg:col-span-7 rounded-2xl border border-vault-border bg-vault-card p-6 shadow-md flex flex-col">
+                    <div className="mb-4">
+                      <h2 className="text-base font-bold text-white flex items-center gap-2">
+                        <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-cyan-500/10 text-cyan-400 text-sm">
+                          📜
+                        </span>
+                        Immutable Audit Trail
+                      </h2>
+                      <p className="text-[11px] text-slate-400">
+                        {activeVaultId
+                          ? `Security events recorded in PostgreSQL for ${activeVaultId.slice(0, 8)}...`
+                          : "Recent lifecycle events recorded in backend database"}
+                      </p>
+                    </div>
+
+                    <div className="flex-1 max-h-96 overflow-y-auto space-y-3 pr-1 text-xs">
+                      {auditLogsStatus && auditLogs.length === 0 ? (
+                        <div className="rounded-xl border border-rose-800/40 bg-rose-950/20 p-4 text-center text-rose-300">
+                          {auditLogsStatus}
+                        </div>
+                      ) : !activeVaultId ? (
+                        <div className="flex flex-col items-center justify-center h-48 text-center p-6 border border-dashed border-vault-border rounded-xl">
+                          <span className="text-2xl mb-2">📋</span>
+                          <p className="text-slate-400 font-medium text-xs">Enter a Vault UUID above to load audit history</p>
+                        </div>
+                      ) : auditLogs.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center h-48 text-center p-6 border border-dashed border-vault-border rounded-xl">
+                          <span className="text-2xl mb-2">📋</span>
+                          <p className="text-slate-400 font-medium text-xs">No activity yet recorded</p>
+                          <p className="text-[11px] text-slate-500 mt-1 max-w-xs">
+                            Security events (vault creation, grants, reveals, revokes) will be cataloged here automatically.
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-left border-collapse">
+                            <thead>
+                              <tr className="border-b border-vault-border text-[11px] text-slate-400 uppercase tracking-wider font-mono">
+                                <th className="py-2.5 px-2 font-semibold">Timestamp</th>
+                                <th className="py-2.5 px-2 font-semibold">Action</th>
+                                <th className="py-2.5 px-2 font-semibold">Wallet</th>
+                                <th className="py-2.5 px-2 font-semibold">Details</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-vault-border/50">
+                              {auditLogs.map((log) => {
+                                const metaStr = formatMetadata(log.metadata);
+                                const actionLabel = mapAuditAction(log.action);
+                                return (
+                                  <tr key={log.id} className="hover:bg-vault-surface/60 transition-colors">
+                                    <td className="py-2 px-2 text-slate-400 text-[11px] whitespace-nowrap font-mono">
+                                      {new Date(log.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                                    </td>
+                                    <td className="py-2 px-2 whitespace-nowrap">
+                                      <span
+                                        className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                                          log.action === "VAULT_CREATED"
+                                            ? "bg-cyan-500/15 text-cyan-300 border border-cyan-500/30"
+                                            : log.action === "ACCESS_GRANTED"
+                                            ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/30"
+                                            : log.action === "SECRET_RETRIEVED"
+                                            ? "bg-blue-500/15 text-blue-300 border border-blue-500/30"
+                                            : log.action === "ACCESS_REVOKED"
+                                            ? "bg-rose-500/15 text-rose-300 border border-rose-500/30"
+                                            : "bg-slate-800 text-slate-300"
+                                        }`}
+                                      >
+                                        {actionLabel}
+                                      </span>
+                                    </td>
+                                    <td className="py-2 px-2 font-mono text-slate-200 text-[11px] whitespace-nowrap">
+                                      {log.walletAddress
+                                        ? `${log.walletAddress.slice(0, 6)}...${log.walletAddress.slice(-4)}`
+                                        : "—"}
+                                    </td>
+                                    <td className="py-2 px-2 text-[11px] text-slate-400">
+                                      {metaStr || "—"}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
-        </div>
-      )}
-    </main>
+        )}
+      </main>
+    </div>
   );
 }
