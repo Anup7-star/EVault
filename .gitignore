@@ -20,6 +20,8 @@
 .DS_Store
 *.pem
 web-vault.zip
+*.tsbuildinfo
+idp/
 
 # debug
 npm-debug.log*
