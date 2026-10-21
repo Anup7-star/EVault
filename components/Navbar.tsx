@@ -15,7 +15,7 @@ export default function Navbar() {
   const pathname = usePathname();
   const { address, isConnected } = useAccount();
   const chainId = useChainId();
-  const { token } = useSession();
+  const { token, status, signIn, signOut } = useSession();
 
   const [isArchOpen, setIsArchOpen] = useState(false);
   const [isNetOpen, setIsNetOpen] = useState(false);
@@ -97,11 +97,42 @@ export default function Navbar() {
               <span className="hidden sm:inline font-mono font-medium">{chainLabel}</span>
             </button>
 
-            {/* SIWE Session Pill */}
+            {/* SIWE Sign In button if connected but not signed in */}
+            {isConnected && !token && (
+              <button
+                onClick={signIn}
+                disabled={status === "signing-in"}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-500/50 bg-gradient-to-r from-cyan-500/20 via-teal-500/20 to-blue-500/20 px-3 py-1.5 text-xs font-bold text-cyan-300 hover:from-cyan-500/35 hover:to-blue-500/35 hover:border-cyan-400 hover:text-white transition-all shadow-sm active:scale-95 disabled:opacity-60"
+                title="Authenticate with EIP-4361 Sign-In with Ethereum"
+              >
+                {status === "signing-in" ? (
+                  <>
+                    <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping" />
+                    <span>Signing in...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>✍️</span>
+                    <span>Sign In</span>
+                  </>
+                )}
+              </button>
+            )}
+
+            {/* SIWE Session Pill & Sign Out when authenticated */}
             {isConnected && token && (
-              <div className="hidden lg:flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-mono text-emerald-400">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                <span>SIWE Verified</span>
+              <div className="flex items-center gap-2">
+                <div className="hidden sm:flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-mono text-emerald-400">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  <span>SIWE Verified</span>
+                </div>
+                <button
+                  onClick={signOut}
+                  className="hidden md:inline-flex items-center px-2 py-1 rounded-md text-[11px] text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+                  title="Sign out of cryptographic session"
+                >
+                  Sign Out
+                </button>
               </div>
             )}
 

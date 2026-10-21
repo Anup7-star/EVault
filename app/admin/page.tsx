@@ -72,12 +72,10 @@ function formatMetadata(metadata: any): string | null {
 export default function AdminDashboard() {
   const { address, isConnected } = useAccount();
   const chainId = useChainId();
-  const { signMessageAsync } = useSignMessage();
   const { writeContractAsync } = useWriteContract();
   const publicClient = usePublicClient();
-  const { token, setSession, clearSession } = useSession();
+  const { token, status: sessionAuthStatus, authStatus, authError, signIn, clearSession } = useSession();
 
-  const [authStatus, setAuthStatus] = useState("");
   const [activeTab, setActiveTab] = useState<"create" | "grant" | "revoke" | "audit">("create");
 
   // Create Vault Form State
@@ -116,14 +114,10 @@ export default function AdminDashboard() {
 
   // Trigger SIWE on mount/connect if not authenticated
   useEffect(() => {
-    if (isConnected && address && !token) {
-      handleSignIn();
+    if (isConnected && address && !token && sessionAuthStatus === "signed-out" && !authError) {
+      signIn();
     }
-    if (!isConnected) {
-      clearSession();
-      setAuthStatus("");
-    }
-  }, [isConnected, address, token]);
+  }, [isConnected, address, token, sessionAuthStatus, authError, signIn]);
 
   // Reset session-derived states when token becomes null
   useEffect(() => {
@@ -139,37 +133,6 @@ export default function AdminDashboard() {
       setRecentVaults([]);
     }
   }, [token]);
-
-  async function handleSignIn() {
-    if (!address) return;
-    setAuthStatus("Fetching secure nonce from Rust backend...");
-    try {
-      const { nonce } = await apiClient.getNonce(address);
-
-      setAuthStatus("Please sign the message in your wallet...");
-      const message = new SiweMessage({
-        domain: window.location.host,
-        address,
-        statement: "Sign in to EVault Admin",
-        uri: window.location.origin,
-        version: "1",
-        chainId,
-        nonce,
-      });
-
-      const signature = await signMessageAsync({
-        message: message.prepareMessage(),
-      });
-
-      setAuthStatus("Verifying signature with Rust backend...");
-      const verifyRes = await apiClient.verifySiwe(message.prepareMessage(), signature);
-
-      setSession(verifyRes.token, verifyRes.walletAddress);
-      setAuthStatus("");
-    } catch (err: any) {
-      setAuthStatus(`Sign-in failed: ${err.message || "Unknown error"}`);
-    }
-  }
 
   async function handleRegisterVault(e: React.FormEvent) {
     e.preventDefault();
@@ -404,18 +367,48 @@ export default function AdminDashboard() {
           </div>
         )}
 
-        {/* Authenticating SIWE banner */}
-        {isConnected && !token && authStatus && (
-          <div className="rounded-2xl border border-cyan-500/30 bg-cyan-950/30 p-5 text-sm text-cyan-200 text-center space-y-3">
-            <p className="animate-pulse font-mono text-xs sm:text-sm">{authStatus}</p>
-            {authStatus.includes("failed") && (
-              <button
-                onClick={handleSignIn}
-                className="rounded-xl border border-cyan-500/50 bg-cyan-500/20 px-4 py-2 text-xs font-bold text-white hover:bg-cyan-500/30 transition-colors"
-              >
-                Retry Cryptographic Sign-In
-              </button>
+        {/* Authenticating SIWE banner or sign-in card */}
+        {isConnected && !token && (
+          <div className="rounded-2xl border border-cyan-500/40 bg-gradient-to-b from-cyan-950/40 to-vault-surface/90 p-8 text-center max-w-xl mx-auto shadow-xl space-y-4">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/30">
+              ✍️
+            </div>
+            <h2 className="text-lg font-bold text-white">Administrator SIWE Authentication Required</h2>
+            <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
+              Sign an EIP-4361 authentication challenge with wallet{" "}
+              <span className="font-mono text-cyan-300 bg-black/40 px-1.5 py-0.5 rounded">
+                {address ? `${address.slice(0, 6)}...${address.slice(-4)}` : ""}
+              </span>{" "}
+              to unlock the Admin Console.
+            </p>
+
+            {authStatus && (
+              <p className="animate-pulse font-mono text-xs text-cyan-300">{authStatus}</p>
             )}
+
+            {authError && (
+              <div className="rounded-xl border border-rose-500/40 bg-rose-950/40 p-3 text-xs text-rose-300 font-mono text-left">
+                {authError}
+              </div>
+            )}
+
+            <button
+              onClick={signIn}
+              disabled={sessionAuthStatus === "signing-in"}
+              className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 px-6 py-3 text-xs sm:text-sm font-bold text-white shadow-lg shadow-cyan-500/25 hover:from-cyan-400 hover:to-blue-500 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-60"
+            >
+              {sessionAuthStatus === "signing-in" ? (
+                <>
+                  <span className="animate-spin text-sm">🔄</span>
+                  <span>Signing In with Ethereum...</span>
+                </>
+              ) : (
+                <>
+                  <span>✍️</span>
+                  <span>Sign In with Ethereum</span>
+                </>
+              )}
+            </button>
           </div>
         )}
 

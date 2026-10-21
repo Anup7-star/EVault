@@ -8,7 +8,7 @@ import { useSession } from "@/components/SessionContext";
 
 export default function Home() {
   const { isConnected, address } = useAccount();
-  const { token } = useSession();
+  const { token, status, authStatus, authError, signIn, signOut } = useSession();
 
   return (
     <div className="min-h-screen flex flex-col bg-vault-bg text-vault-text selection:bg-cyan-500/30 selection:text-cyan-200">
@@ -36,6 +36,83 @@ export default function Home() {
             Eliminate centralized credential leaks. Store confidential secrets with hardware-grade
             AES-256-GCM encryption, managed by immutable on-chain smart contract permissions and EIP-4361 SIWE authentication.
           </p>
+
+          {/* Interactive Sign-In & Authentication Hero State */}
+          {isConnected && !token && (
+            <div className="rounded-2xl border border-cyan-500/40 bg-gradient-to-b from-cyan-950/40 via-vault-card/80 to-vault-surface/90 backdrop-blur-md p-6 text-center max-w-xl mx-auto shadow-xl shadow-cyan-950/40 space-y-4">
+              <div className="flex items-center justify-center gap-2">
+                <span className="relative flex h-2.5 w-2.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-400" />
+                </span>
+                <span className="text-xs font-mono font-bold text-amber-300 uppercase tracking-wider">
+                  Wallet Connected • Sign-In Required
+                </span>
+              </div>
+
+              <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
+                Connected:{" "}
+                <span className="font-mono text-cyan-300 bg-black/50 px-2 py-0.5 rounded border border-cyan-500/30">
+                  {address ? `${address.slice(0, 6)}...${address.slice(-4)}` : ""}
+                </span>
+                . Authenticate via EIP-4361 Sign-In with Ethereum to access encrypted credentials and manage vaults.
+              </p>
+
+              {authStatus && (
+                <p className="text-xs font-mono text-cyan-300 animate-pulse">{authStatus}</p>
+              )}
+
+              {authError && (
+                <div className="rounded-xl border border-rose-500/40 bg-rose-950/40 p-3 text-xs text-rose-300 font-mono text-left">
+                  {authError}
+                </div>
+              )}
+
+              <div className="pt-1 flex items-center justify-center gap-3">
+                <button
+                  onClick={signIn}
+                  disabled={status === "signing-in"}
+                  className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 via-teal-400 to-emerald-500 px-6 py-3 text-xs sm:text-sm font-bold text-slate-950 shadow-lg shadow-cyan-500/25 hover:from-cyan-400 hover:to-emerald-400 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-60"
+                >
+                  {status === "signing-in" ? (
+                    <>
+                      <span className="animate-spin text-sm">🔄</span>
+                      <span>Signing In with Ethereum...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>✍️</span>
+                      <span>Sign In with Ethereum</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {isConnected && token && (
+            <div className="rounded-2xl border border-emerald-500/30 bg-emerald-950/20 backdrop-blur-md p-4 max-w-xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-2.5 text-emerald-300">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+                </span>
+                <span>
+                  Authenticated:{" "}
+                  <span className="font-mono font-bold text-white">
+                    {address?.slice(0, 6)}...{address?.slice(-4)}
+                  </span>{" "}
+                  (SIWE Session Active)
+                </span>
+              </div>
+              <button
+                onClick={signOut}
+                className="text-slate-400 hover:text-rose-300 transition-colors font-mono underline"
+              >
+                Sign Out
+              </button>
+            </div>
+          )}
 
           {/* Quick status callout */}
           <div className="pt-2 flex flex-wrap items-center justify-center gap-3">

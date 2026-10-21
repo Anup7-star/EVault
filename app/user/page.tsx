@@ -2,19 +2,15 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useAccount, useSignMessage, useChainId } from "wagmi";
-import { SiweMessage } from "siwe";
+import { useAccount } from "wagmi";
 import Navbar from "@/components/Navbar";
 import { useSession } from "@/components/SessionContext";
 import { apiClient } from "@/lib/apiClient";
 
 export default function UserDashboard() {
   const { address, isConnected } = useAccount();
-  const chainId = useChainId();
-  const { signMessageAsync } = useSignMessage();
-  const { token, setSession, clearSession } = useSession();
+  const { token, status: sessionAuthStatus, authStatus, authError, signIn, clearSession } = useSession();
 
-  const [authStatus, setAuthStatus] = useState("");
   const [vaults, setVaults] = useState<any[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [listError, setListError] = useState<string | null>(null);
@@ -28,14 +24,10 @@ export default function UserDashboard() {
 
   // Trigger SIWE on mount/connect if not authenticated
   useEffect(() => {
-    if (isConnected && address && !token) {
-      handleSignIn();
+    if (isConnected && address && !token && sessionAuthStatus === "signed-out" && !authError) {
+      signIn();
     }
-    if (!isConnected) {
-      clearSession();
-      setAuthStatus("");
-    }
-  }, [isConnected, address, token]);
+  }, [isConnected, address, token, sessionAuthStatus, authError, signIn]);
 
   // Fetch vaults when authenticated
   useEffect(() => {
@@ -63,37 +55,6 @@ export default function UserDashboard() {
       setListError(err.message || "An unexpected error occurred while fetching accessible vaults.");
     } finally {
       setIsLoadingList(false);
-    }
-  }
-
-  async function handleSignIn() {
-    if (!address) return;
-    setAuthStatus("Requesting secure SIWE nonce...");
-    try {
-      const { nonce } = await apiClient.getNonce(address);
-
-      setAuthStatus("Please sign the authentication message in your wallet...");
-      const message = new SiweMessage({
-        domain: window.location.host,
-        address,
-        statement: "Sign in to EVault",
-        uri: window.location.origin,
-        version: "1",
-        chainId,
-        nonce,
-      });
-
-      const signature = await signMessageAsync({
-        message: message.prepareMessage(),
-      });
-
-      setAuthStatus("Verifying signature with Rust backend...");
-      const verifyRes = await apiClient.verifySiwe(message.prepareMessage(), signature);
-
-      setSession(verifyRes.token, verifyRes.walletAddress);
-      setAuthStatus("");
-    } catch (err: any) {
-      setAuthStatus(`Sign-in failed: ${err.message || "Unknown error"}`);
     }
   }
 
@@ -200,18 +161,48 @@ export default function UserDashboard() {
           </div>
         )}
 
-        {/* Authenticating State */}
-        {isConnected && !token && authStatus && (
-          <div className="rounded-2xl border border-amber-500/30 bg-amber-950/20 p-5 text-sm text-amber-200 text-center space-y-3">
-            <p className="animate-pulse font-mono text-xs sm:text-sm">{authStatus}</p>
-            {authStatus.includes("failed") && (
-              <button
-                onClick={handleSignIn}
-                className="rounded-xl border border-amber-500/50 bg-amber-500/20 px-4 py-2 text-xs font-bold text-white hover:bg-amber-500/30 transition-colors"
-              >
-                Retry Cryptographic Sign-In
-              </button>
+        {/* Authenticating State or Sign-In Card */}
+        {isConnected && !token && (
+          <div className="rounded-2xl border border-amber-500/40 bg-gradient-to-b from-amber-950/40 to-vault-surface/90 p-8 text-center max-w-xl mx-auto shadow-xl space-y-4">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-500/10 text-amber-400 border border-amber-500/30">
+              🔑
+            </div>
+            <h2 className="text-lg font-bold text-white">Member SIWE Authentication Required</h2>
+            <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
+              Sign an EIP-4361 authentication challenge with wallet{" "}
+              <span className="font-mono text-amber-300 bg-black/40 px-1.5 py-0.5 rounded">
+                {address ? `${address.slice(0, 6)}...${address.slice(-4)}` : ""}
+              </span>{" "}
+              to view your shared vaults and decrypt secrets.
+            </p>
+
+            {authStatus && (
+              <p className="animate-pulse font-mono text-xs text-amber-300">{authStatus}</p>
             )}
+
+            {authError && (
+              <div className="rounded-xl border border-rose-500/40 bg-rose-950/40 p-3 text-xs text-rose-300 font-mono text-left">
+                {authError}
+              </div>
+            )}
+
+            <button
+              onClick={signIn}
+              disabled={sessionAuthStatus === "signing-in"}
+              className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-amber-500 to-orange-600 px-6 py-3 text-xs sm:text-sm font-bold text-slate-950 shadow-lg shadow-amber-500/25 hover:from-amber-400 hover:to-orange-500 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-60"
+            >
+              {sessionAuthStatus === "signing-in" ? (
+                <>
+                  <span className="animate-spin text-sm">🔄</span>
+                  <span>Signing In with Ethereum...</span>
+                </>
+              ) : (
+                <>
+                  <span>✍️</span>
+                  <span>Sign In with Ethereum</span>
+                </>
+              )}
+            </button>
           </div>
         )}
 

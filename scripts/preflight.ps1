@@ -126,7 +126,7 @@ try {
 }
 Report-Check 4 "Backend health check (http://localhost:3001/health)" $item4Passed $item4Reason
 
-# (5) Postgres container from backend/docker-compose.yml is running
+# (5) Postgres is running (via docker container or listening on port 5432)
 $item5Passed = $false
 $item5Reason = ""
 $dockerComposeFile = Join-Path $projectRoot "backend\docker-compose.yml"
@@ -135,13 +135,27 @@ try {
     if ($composeOutput -match "evault-postgres" -and $composeOutput -match "(Up|running)") {
         $item5Passed = $true
         $item5Reason = "Postgres container is running (evault-postgres)"
-    } else {
-        $item5Reason = "Postgres container is not running in backend/docker-compose.yml"
     }
-} catch {
-    $item5Reason = "docker compose failed to inspect postgres container ($($_.Exception.Message))"
+} catch {}
+
+if (-not $item5Passed) {
+    try {
+        $pgTcp = New-Object System.Net.Sockets.TcpClient
+        $pgIar = $pgTcp.BeginConnect("127.0.0.1", 5432, $null, $null)
+        if ($pgIar.AsyncWaitHandle.WaitOne(1500, $false) -and $pgTcp.Connected) {
+            $pgTcp.EndConnect($pgIar)
+            $pgTcp.Close()
+            $item5Passed = $true
+            $item5Reason = "PostgreSQL service is running and listening on port 5432"
+        } else {
+            $pgTcp.Close()
+            $item5Reason = "PostgreSQL is not listening on port 5432 and container is not running"
+        }
+    } catch {
+        $item5Reason = "Failed to connect to PostgreSQL ($($_.Exception.Message))"
+    }
 }
-Report-Check 5 "Postgres container status" $item5Passed $item5Reason
+Report-Check 5 "PostgreSQL database status" $item5Passed $item5Reason
 
 # (6) Port 3000 is listening (the SIWE domain is hardcoded to localhost:3000)
 $item6Passed = $false
